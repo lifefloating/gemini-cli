@@ -171,17 +171,30 @@ const ToolInfo: React.FC<ToolInfo> = ({
       }
     }
   }, [emphasis]);
+
+  const namePrefix = `${name} `;
+  const namePrefixWidth = namePrefix.length;
+
   return (
-    <Box>
-      <Text
-        wrap="truncate-end"
-        strikethrough={status === ToolCallStatus.Canceled}
-      >
-        <Text color={nameColor} bold>
-          {name}
-        </Text>{' '}
-        <Text color={Colors.Gray}>{description}</Text>
-      </Text>
+    <Box flexDirection="row">
+      <Box width={namePrefixWidth} flexShrink={0}>
+        <Text
+          color={nameColor}
+          bold
+          strikethrough={status === ToolCallStatus.Canceled}
+        >
+          {namePrefix}
+        </Text>
+      </Box>
+      <Box flexGrow={1}>
+        <Text
+          wrap="wrap"
+          color={Colors.Gray}
+          strikethrough={status === ToolCallStatus.Canceled}
+        >
+          {description}
+        </Text>
+      </Box>
     </Box>
   );
 };

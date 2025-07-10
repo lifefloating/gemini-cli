@@ -148,6 +148,52 @@ describe('<ToolMessage />', () => {
     });
   });
 
+  // Tests for the ToolInfo component refactoring
+  describe('ToolInfo component layout changes', () => {
+    it('renders tool name with space prefix as namePrefix', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage {...baseProps} name="my-tool" />,
+        StreamingState.Idle,
+      );
+      const output = lastFrame();
+      // The namePrefix should be "my-tool " (name + space)
+      expect(output).toContain('my-tool ');
+    });
+
+    it('handles different tool name lengths for namePrefix calculation', () => {
+      const shortName = 'ls';
+      const longName = 'very-long-tool-name';
+      
+      const { lastFrame: shortFrame } = renderWithContext(
+        <ToolMessage {...baseProps} name={shortName} />,
+        StreamingState.Idle,
+      );
+      const { lastFrame: longFrame } = renderWithContext(
+        <ToolMessage {...baseProps} name={longName} />,
+        StreamingState.Idle,
+      );
+      
+      // Both should render with space suffix
+      expect(shortFrame()).toContain('ls ');
+      expect(longFrame()).toContain('very-long-tool-name ');
+    });
+
+    it('renders name and description separately in new layout structure', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage 
+          {...baseProps} 
+          name="tool1" 
+          description="This is a description that can wrap"
+        />,
+        StreamingState.Idle,
+      );
+      const output = lastFrame();
+      // Both name and description should be present
+      expect(output).toContain('tool1 ');
+      expect(output).toContain('This is a description that can wrap');
+    });
+  });
+
   it('renders DiffRenderer for diff results', () => {
     const diffResult = {
       fileDiff: '--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new',
