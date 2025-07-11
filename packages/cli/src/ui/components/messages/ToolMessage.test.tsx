@@ -163,7 +163,7 @@ describe('<ToolMessage />', () => {
     it('handles different tool name lengths for namePrefix calculation', () => {
       const shortName = 'ls';
       const longName = 'very-long-tool-name';
-      
+
       const { lastFrame: shortFrame } = renderWithContext(
         <ToolMessage {...baseProps} name={shortName} />,
         StreamingState.Idle,
@@ -172,7 +172,7 @@ describe('<ToolMessage />', () => {
         <ToolMessage {...baseProps} name={longName} />,
         StreamingState.Idle,
       );
-      
+
       // Both should render with space suffix
       expect(shortFrame()).toContain('ls ');
       expect(longFrame()).toContain('very-long-tool-name ');
@@ -180,9 +180,9 @@ describe('<ToolMessage />', () => {
 
     it('renders name and description separately in new layout structure', () => {
       const { lastFrame } = renderWithContext(
-        <ToolMessage 
-          {...baseProps} 
-          name="tool1" 
+        <ToolMessage
+          {...baseProps}
+          name="tool1"
           description="This is a description that can wrap"
         />,
         StreamingState.Idle,
