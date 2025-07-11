@@ -12,6 +12,7 @@ import { Colors } from '../../colors.js';
 import { MarkdownDisplay } from '../../utils/MarkdownDisplay.js';
 import { GeminiRespondingSpinner } from '../GeminiRespondingSpinner.js';
 import { MaxSizedBox } from '../shared/MaxSizedBox.js';
+import stringWidth from 'string-width';
 
 const STATIC_HEIGHT = 1;
 const RESERVED_LINE_COUNT = 5; // for tool name, status, padding etc.
@@ -71,6 +72,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
           status={status}
           description={description}
           emphasis={emphasis}
+          terminalWidth={terminalWidth}
         />
         {emphasis === 'high' && <TrailingIndicator />}
       </Box>
@@ -150,12 +152,14 @@ type ToolInfo = {
   description: string;
   status: ToolCallStatus;
   emphasis: TextEmphasis;
+  terminalWidth: number;
 };
 const ToolInfo: React.FC<ToolInfo> = ({
   name,
   description,
   status,
   emphasis,
+  terminalWidth,
 }) => {
   const nameColor = React.useMemo<string>(() => {
     switch (emphasis) {
@@ -173,15 +177,19 @@ const ToolInfo: React.FC<ToolInfo> = ({
   }, [emphasis]);
 
   const namePrefix = `${name} `;
-  const namePrefixWidth = namePrefix.length;
+  const namePrefixWidth = stringWidth(namePrefix);
+
+  const maxNameWidth = Math.floor(terminalWidth * 0.7);
+  const effectiveNameWidth = Math.min(namePrefixWidth, maxNameWidth);
 
   return (
     <Box flexDirection="row">
-      <Box width={namePrefixWidth} flexShrink={0}>
+      <Box width={effectiveNameWidth} flexShrink={0}>
         <Text
           color={nameColor}
           bold
           strikethrough={status === ToolCallStatus.Canceled}
+          wrap="truncate"
         >
           {namePrefix}
         </Text>

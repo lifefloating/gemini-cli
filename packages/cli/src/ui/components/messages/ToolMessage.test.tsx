@@ -192,6 +192,57 @@ describe('<ToolMessage />', () => {
       expect(output).toContain('tool1 ');
       expect(output).toContain('This is a description that can wrap');
     });
+
+    it('respects terminalWidth for name display', () => {
+      const narrowTerminal = 20;
+      const wideTerminal = 100;
+      const longToolName =
+        'extremely-long-tool-name-that-exceeds-most-terminal-widths';
+
+      const { lastFrame: narrowFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          name={longToolName}
+          terminalWidth={narrowTerminal}
+        />,
+        StreamingState.Idle,
+      );
+      const { lastFrame: wideFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          name={longToolName}
+          terminalWidth={wideTerminal}
+        />,
+        StreamingState.Idle,
+      );
+
+      const narrowOutput = narrowFrame();
+      const wideOutput = wideFrame();
+
+      expect(narrowOutput).toContain(longToolName.substring(0, 10));
+      expect(wideOutput).toContain(longToolName);
+    });
+
+    it('calculates effective name width properly', () => {
+      const terminalWidth = 50;
+      const maxNameWidth = Math.floor(terminalWidth * 0.7);
+      const longName = 'a'.repeat(40);
+
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          name={longName}
+          terminalWidth={terminalWidth}
+        />,
+        StreamingState.Idle,
+      );
+
+      const output = lastFrame();
+      expect(output).toContain('aaa');
+
+      expect(maxNameWidth).toBe(35);
+      expect(longName.length).toBeGreaterThan(maxNameWidth);
+    });
   });
 
   it('renders DiffRenderer for diff results', () => {
@@ -223,5 +274,31 @@ describe('<ToolMessage />', () => {
     // This is harder to assert directly in text output without color checks.
     // We can at least ensure it doesn't have the high emphasis indicator.
     expect(lowEmphasisFrame()).not.toContain('←');
+  });
+
+  describe('terminal width handling', () => {
+    it('handles very narrow terminal widths gracefully', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage {...baseProps} terminalWidth={10} />,
+        StreamingState.Idle,
+      );
+
+      const output = lastFrame();
+      expect(output).toBeDefined();
+      expect(output).toContain('✔');
+    });
+
+    it('handles very wide terminal widths', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage {...baseProps} terminalWidth={200} />,
+        StreamingState.Idle,
+      );
+
+      // Should render without throwing errors and show full content
+      const output = lastFrame();
+      expect(output).toBeDefined();
+      expect(output).toContain('test-tool ');
+      expect(output).toContain('A tool for testing');
+    });
   });
 });
