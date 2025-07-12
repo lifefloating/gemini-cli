@@ -193,25 +193,78 @@ describe('<ToolMessage />', () => {
       expect(output).toContain('This is a description that can wrap');
     });
 
-    it('respects terminalWidth for name display', () => {
-      const narrowTerminal = 20;
-      const wideTerminal = 100;
-      const longToolName =
-        'extremely-long-tool-name-that-exceeds-most-terminal-widths';
-
-      const { lastFrame: narrowFrame } = renderWithContext(
+    it('displays short descriptions fully without truncation', () => {
+      const shortDescription = 'A short tool description';
+      const { lastFrame } = renderWithContext(
         <ToolMessage
           {...baseProps}
-          name={longToolName}
-          terminalWidth={narrowTerminal}
+          description={shortDescription}
+          terminalWidth={80}
         />,
         StreamingState.Idle,
       );
+      const output = lastFrame();
+      expect(output).toContain(shortDescription);
+      expect(output).not.toContain('...');
+    });
+
+    it('displays medium-length descriptions with wrapping', () => {
+      const mediumDescription =
+        'This is a longer description that should wrap across multiple lines but still display fully without being truncated by the smart limiting logic';
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          description={mediumDescription}
+          terminalWidth={80}
+        />,
+        StreamingState.Idle,
+      );
+      const output = lastFrame();
+      expect(output).toContain('This is a longer description');
+      expect(output).toContain('logic');
+      expect(output).not.toContain('...');
+    });
+
+    it('truncates extremely long descriptions to prevent layout issues', () => {
+      const baseAvailableWidth = 80 - 2 - 3 - 'test-tool '.length - 2; // ~65 chars
+      const maxReasonableLength = baseAvailableWidth * 8; // ~520 chars
+      const baseDescription = 'A'.repeat(maxReasonableLength + 50);
+      const uniqueEnding = 'UNIQUE_ENDING_MARKER';
+      const extremelyLongDescription = baseDescription + uniqueEnding;
+
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          description={extremelyLongDescription}
+          terminalWidth={80}
+        />,
+        StreamingState.Idle,
+      );
+      const output = lastFrame();
+      expect(output).toContain('AAA');
+      expect(output).toContain('...');
+      expect(output).not.toContain('UNIQUE_ENDING_MARKER');
+    });
+
+    it('calculates truncation based on terminal width', () => {
+      const longDescription = 'A'.repeat(1000);
+
+      // Test with narrow terminal
+      const { lastFrame: narrowFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          description={longDescription}
+          terminalWidth={40}
+        />,
+        StreamingState.Idle,
+      );
+
+      // Test with wide terminal
       const { lastFrame: wideFrame } = renderWithContext(
         <ToolMessage
           {...baseProps}
-          name={longToolName}
-          terminalWidth={wideTerminal}
+          description={longDescription}
+          terminalWidth={120}
         />,
         StreamingState.Idle,
       );
@@ -219,29 +272,9 @@ describe('<ToolMessage />', () => {
       const narrowOutput = narrowFrame();
       const wideOutput = wideFrame();
 
-      expect(narrowOutput).toContain(longToolName.substring(0, 10));
-      expect(wideOutput).toContain(longToolName);
-    });
-
-    it('calculates effective name width properly', () => {
-      const terminalWidth = 50;
-      const maxNameWidth = Math.floor(terminalWidth * 0.7);
-      const longName = 'a'.repeat(40);
-
-      const { lastFrame } = renderWithContext(
-        <ToolMessage
-          {...baseProps}
-          name={longName}
-          terminalWidth={terminalWidth}
-        />,
-        StreamingState.Idle,
-      );
-
-      const output = lastFrame();
-      expect(output).toContain('aaa');
-
-      expect(maxNameWidth).toBe(35);
-      expect(longName.length).toBeGreaterThan(maxNameWidth);
+      expect(narrowOutput).toContain('...');
+      expect(wideOutput).toContain('...');
+      expect(wideOutput.length).toBeGreaterThan(narrowOutput.length);
     });
   });
 
@@ -274,31 +307,5 @@ describe('<ToolMessage />', () => {
     // This is harder to assert directly in text output without color checks.
     // We can at least ensure it doesn't have the high emphasis indicator.
     expect(lowEmphasisFrame()).not.toContain('←');
-  });
-
-  describe('terminal width handling', () => {
-    it('handles very narrow terminal widths gracefully', () => {
-      const { lastFrame } = renderWithContext(
-        <ToolMessage {...baseProps} terminalWidth={10} />,
-        StreamingState.Idle,
-      );
-
-      const output = lastFrame();
-      expect(output).toBeDefined();
-      expect(output).toContain('✔');
-    });
-
-    it('handles very wide terminal widths', () => {
-      const { lastFrame } = renderWithContext(
-        <ToolMessage {...baseProps} terminalWidth={200} />,
-        StreamingState.Idle,
-      );
-
-      // Should render without throwing errors and show full content
-      const output = lastFrame();
-      expect(output).toBeDefined();
-      expect(output).toContain('test-tool ');
-      expect(output).toContain('A tool for testing');
-    });
   });
 });

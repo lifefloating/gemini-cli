@@ -179,17 +179,25 @@ const ToolInfo: React.FC<ToolInfo> = ({
   const namePrefix = `${name} `;
   const namePrefixWidth = stringWidth(namePrefix);
 
-  const maxNameWidth = Math.floor(terminalWidth * 0.7);
-  const effectiveNameWidth = Math.min(namePrefixWidth, maxNameWidth);
+  // Calculate available width for description
+  const availableDescriptionWidth =
+    terminalWidth - 2 - STATUS_INDICATOR_WIDTH - namePrefixWidth - 2;
+
+  // preventing extreme cases that could cause flickering
+  const maxReasonableLength = availableDescriptionWidth * 8;
+  const shouldTruncate = stringWidth(description) > maxReasonableLength;
+
+  const displayDescription = shouldTruncate
+    ? description.slice(0, maxReasonableLength - 3) + '...'
+    : description;
 
   return (
     <Box flexDirection="row">
-      <Box width={effectiveNameWidth} flexShrink={0}>
+      <Box width={namePrefixWidth} flexShrink={0}>
         <Text
           color={nameColor}
           bold
           strikethrough={status === ToolCallStatus.Canceled}
-          wrap="truncate"
         >
           {namePrefix}
         </Text>
@@ -200,7 +208,7 @@ const ToolInfo: React.FC<ToolInfo> = ({
           color={Colors.Gray}
           strikethrough={status === ToolCallStatus.Canceled}
         >
-          {description}
+          {displayDescription}
         </Text>
       </Box>
     </Box>
