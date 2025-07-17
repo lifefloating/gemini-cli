@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
 import { SuggestionsDisplay } from './SuggestionsDisplay.js';
@@ -40,6 +40,7 @@ export interface InputPromptProps {
   suggestionsWidth: number;
   shellModeActive: boolean;
   setShellModeActive: (value: boolean) => void;
+  onEscapePromptChange?: (showPrompt: boolean) => void;
 }
 
 export const InputPrompt: React.FC<InputPromptProps> = ({
@@ -56,9 +57,12 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   suggestionsWidth,
   shellModeActive,
   setShellModeActive,
+  onEscapePromptChange,
 }) => {
   const [justNavigatedHistory, setJustNavigatedHistory] = useState(false);
   const [escPressCount, setEscPressCount] = useState(0);
+  const [showEscapePrompt, setShowEscapePrompt] = useState(false);
+  const escapeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const completion = useCompletion(
     buffer.text,
     config.getTargetDir(),
@@ -232,15 +236,38 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     }
   }, [buffer, config]);
 
+  // Clear escape prompt timer on unmount
+  useEffect(() => {
+    return () => {
+      if (escapeTimerRef.current) {
+        clearTimeout(escapeTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Notify parent component about escape prompt state changes
+  useEffect(() => {
+    if (onEscapePromptChange) {
+      onEscapePromptChange(showEscapePrompt);
+    }
+  }, [showEscapePrompt, onEscapePromptChange]);
+
   const handleInput = useCallback(
     (key: Key) => {
       if (!focus) {
         return;
       }
 
-      // Reset ESC count on any non-ESC key
+      // Reset ESC count and hide prompt on any non-ESC key
       if (key.name !== 'escape') {
-        setEscPressCount(0);
+        if (escPressCount > 0 || showEscapePrompt) {
+          setEscPressCount(0);
+          setShowEscapePrompt(false);
+          if (escapeTimerRef.current) {
+            clearTimeout(escapeTimerRef.current);
+            escapeTimerRef.current = null;
+          }
+        }
       }
 
       if (
@@ -257,23 +284,52 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         // Handle existing ESC functionality first
         if (shellModeActive) {
           setShellModeActive(false);
-          setEscPressCount(0); // Reset count after handling
+          setEscPressCount(0);
+          setShowEscapePrompt(false);
+          if (escapeTimerRef.current) {
+            clearTimeout(escapeTimerRef.current);
+            escapeTimerRef.current = null;
+          }
           return;
         }
 
         if (completion.showSuggestions) {
           completion.resetCompletionState();
-          setEscPressCount(0); // Reset count after handling
+          setEscPressCount(0);
+          setShowEscapePrompt(false);
+          if (escapeTimerRef.current) {
+            clearTimeout(escapeTimerRef.current);
+            escapeTimerRef.current = null;
+          }
           return;
         }
 
-        // If no other ESC handling, increment count
+        // Handle double ESC for clearing input
         setEscPressCount((prev) => {
           const newCount = prev + 1;
-          if (newCount >= 2) {
-            // Double ESC pressed - clear input
+          if (newCount === 1) {
+            // First ESC press - show prompt
+            setShowEscapePrompt(true);
+            // Clear any existing timer
+            if (escapeTimerRef.current) {
+              clearTimeout(escapeTimerRef.current);
+            }
+            // Set timer to auto-hide prompt and reset count
+            escapeTimerRef.current = setTimeout(() => {
+              setShowEscapePrompt(false);
+              setEscPressCount(0);
+              escapeTimerRef.current = null;
+            }, 2000); // Show prompt for 2 seconds
+            return newCount;
+          } else if (newCount >= 2) {
+            // Second ESC press - clear input
             buffer.setText('');
             resetCompletionState();
+            setShowEscapePrompt(false);
+            if (escapeTimerRef.current) {
+              clearTimeout(escapeTimerRef.current);
+              escapeTimerRef.current = null;
+            }
             return 0; // Reset count
           }
           return newCount;
@@ -430,6 +486,8 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       shellHistory,
       handleClipboardImage,
       resetCompletionState,
+      escPressCount,
+      showEscapePrompt,
     ],
   );
 
