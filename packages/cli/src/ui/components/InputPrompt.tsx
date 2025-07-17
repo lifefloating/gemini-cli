@@ -58,6 +58,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   setShellModeActive,
 }) => {
   const [justNavigatedHistory, setJustNavigatedHistory] = useState(false);
+  const [escPressCount, setEscPressCount] = useState(0);
   const completion = useCompletion(
     buffer.text,
     config.getTargetDir(),
@@ -237,6 +238,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         return;
       }
 
+      // Reset ESC count on any non-ESC key
+      if (key.name !== 'escape') {
+        setEscPressCount(0);
+      }
+
       if (
         key.sequence === '!' &&
         buffer.text === '' &&
@@ -248,15 +254,31 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       }
 
       if (key.name === 'escape') {
+        // Handle existing ESC functionality first
         if (shellModeActive) {
           setShellModeActive(false);
+          setEscPressCount(0); // Reset count after handling
           return;
         }
 
         if (completion.showSuggestions) {
           completion.resetCompletionState();
+          setEscPressCount(0); // Reset count after handling
           return;
         }
+
+        // If no other ESC handling, increment count
+        setEscPressCount((prev) => {
+          const newCount = prev + 1;
+          if (newCount >= 2) {
+            // Double ESC pressed - clear input
+            buffer.setText('');
+            resetCompletionState();
+            return 0; // Reset count
+          }
+          return newCount;
+        });
+        return;
       }
 
       if (key.ctrl && key.name === 'l') {
