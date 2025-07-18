@@ -443,9 +443,8 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
         if (timerRef.current) {
           clearTimeout(timerRef.current);
         }
-        // Directly exit the process instead of relying on quitCommand.action()
-        // which only returns an object and doesn't actually exit
-        process.exit(0);
+        // Reuse existing /quit command logic to maintain consistency
+        handleSlashCommand('/quit');
       } else {
         setPressedOnce(true);
         timerRef.current = setTimeout(() => {
@@ -454,8 +453,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
         }, CTRL_EXIT_PROMPT_DURATION_MS);
       }
     },
-    // Add commandContext to the dependency array here!
-    [slashCommands, commandContext],
+    [handleSlashCommand],
   );
 
   useInput((input: string, key: InkKeyType) => {
