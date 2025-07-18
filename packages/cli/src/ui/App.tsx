@@ -977,7 +977,6 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                   setShellModeActive={setShellModeActive}
                   onEscapePromptChange={handleEscapePromptChange}
                   onClearBuffer={handleClearBuffer}
-                  focus={isFocused}
                 />
               )}
             </>
