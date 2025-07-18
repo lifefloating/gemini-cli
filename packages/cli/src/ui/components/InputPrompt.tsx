@@ -41,6 +41,7 @@ export interface InputPromptProps {
   shellModeActive: boolean;
   setShellModeActive: (value: boolean) => void;
   onEscapePromptChange?: (showPrompt: boolean) => void;
+  onClearBuffer?: (clearFn: () => void) => void;
 }
 
 export const InputPrompt: React.FC<InputPromptProps> = ({
@@ -58,6 +59,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   shellModeActive,
   setShellModeActive,
   onEscapePromptChange,
+  onClearBuffer,
 }) => {
   const [justNavigatedHistory, setJustNavigatedHistory] = useState(false);
   const [escPressCount, setEscPressCount] = useState(0);
@@ -252,6 +254,19 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     }
   }, [showEscapePrompt, onEscapePromptChange]);
 
+  // Create clear buffer function for external use
+  const clearBuffer = useCallback(() => {
+    buffer.setText('');
+    resetCompletionState();
+  }, [buffer, resetCompletionState]);
+
+  // Handle external clear buffer requests
+  useEffect(() => {
+    if (onClearBuffer) {
+      onClearBuffer(clearBuffer);
+    }
+  }, [onClearBuffer, clearBuffer]);
+
   const handleInput = useCallback(
     (key: Key) => {
       if (!focus) {
@@ -319,12 +334,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
               setShowEscapePrompt(false);
               setEscPressCount(0);
               escapeTimerRef.current = null;
-            }, 2000); // Show prompt for 2 seconds
+            }, 1000); // Show prompt for 1 seconds
             return newCount;
           } else if (newCount >= 2) {
             // Second ESC press - clear input
-            buffer.setText('');
-            resetCompletionState();
+            clearBuffer();
             setShowEscapePrompt(false);
             if (escapeTimerRef.current) {
               clearTimeout(escapeTimerRef.current);
@@ -435,15 +449,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       if (key.ctrl && key.name === 'e') {
         buffer.move('end');
         buffer.moveToOffset(cpLen(buffer.text));
-        return;
-      }
-      // Ctrl+C (Clear input)
-      if (key.ctrl && key.name === 'c') {
-        if (buffer.text.length > 0) {
-          buffer.setText('');
-          resetCompletionState();
-          return;
-        }
         return;
       }
 

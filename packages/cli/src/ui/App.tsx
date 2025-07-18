@@ -157,6 +157,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     useState<boolean>(false);
   const [userTier, setUserTier] = useState<UserTierId | undefined>(undefined);
   const [showEscapePrompt, setShowEscapePrompt] = useState(false);
+  const [clearBufferFn, setClearBufferFn] = useState<(() => void) | null>(null);
 
   const openPrivacyNotice = useCallback(() => {
     setShowPrivacyNotice(true);
@@ -164,6 +165,10 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
   
   const handleEscapePromptChange = useCallback((showPrompt: boolean) => {
     setShowEscapePrompt(showPrompt);
+  }, []);
+
+  const handleClearBuffer = useCallback((clearFn: () => void) => {
+    setClearBufferFn(() => clearFn);
   }, []);
   
   const initialPromptSubmitted = useRef(false);
@@ -438,15 +443,9 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
         if (timerRef.current) {
           clearTimeout(timerRef.current);
         }
-        const quitCommand = slashCommands.find(
-          (cmd) => cmd.name === 'quit' || cmd.altName === 'exit',
-        );
-        if (quitCommand && quitCommand.action) {
-          quitCommand.action(commandContext, '');
-        } else {
-          // This is unlikely to be needed but added for an additional fallback.
-          process.exit(0);
-        }
+        // Directly exit the process instead of relying on quitCommand.action()
+        // which only returns an object and doesn't actually exit
+        process.exit(0);
       } else {
         setPressedOnce(true);
         timerRef.current = setTimeout(() => {
@@ -470,7 +469,24 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
       setConstrainHeight(true);
     }
 
-    if (key.ctrl && input === 'o') {
+    if (key.escape) {
+      if (ctrlCPressedOnce) {
+        setCtrlCPressedOnce(false);
+        if (ctrlCTimerRef.current) {
+          clearTimeout(ctrlCTimerRef.current);
+          ctrlCTimerRef.current = null;
+        }
+        return;
+      }
+      if (ctrlDPressedOnce) {
+        setCtrlDPressedOnce(false);
+        if (ctrlDTimerRef.current) {
+          clearTimeout(ctrlDTimerRef.current);
+          ctrlDTimerRef.current = null;
+        }
+        return;
+      }
+    } else if (key.ctrl && input === 'o') {
       setShowErrorDetails((prev) => !prev);
     } else if (key.ctrl && input === 't') {
       const newValue = !showToolDescriptions;
@@ -481,7 +497,21 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
         handleSlashCommand(newValue ? '/mcp desc' : '/mcp nodesc');
       }
     } else if (key.ctrl && (input === 'c' || input === 'C')) {
-      handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
+      // Check if input buffer has content
+      if (buffer.text.length > 0) {
+        if (clearBufferFn) {
+          clearBufferFn();
+        } else {
+          buffer.setText('');
+        }
+        setCtrlCPressedOnce(true);
+        ctrlCTimerRef.current = setTimeout(() => {
+          setCtrlCPressedOnce(false);
+          ctrlCTimerRef.current = null;
+        }, CTRL_EXIT_PROMPT_DURATION_MS);
+      } else {
+        handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
+      }
     } else if (key.ctrl && (input === 'd' || input === 'D')) {
       if (buffer.text.length > 0) {
         // Do nothing if there is text in the input.
@@ -895,7 +925,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                       Press Ctrl+D again to exit.
                     </Text>
                   ) : showEscapePrompt ? (
-                    <Text color={Colors.AccentYellow}>
+                    <Text color={Colors.Gray}>
                       Press Escape again to clear.
                     </Text>
                   ) : (
@@ -947,6 +977,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                   shellModeActive={shellModeActive}
                   setShellModeActive={setShellModeActive}
                   onEscapePromptChange={handleEscapePromptChange}
+                  onClearBuffer={handleClearBuffer}
                 />
               )}
             </>
