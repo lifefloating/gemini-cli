@@ -58,7 +58,7 @@ import {
   FlashFallbackEvent,
   logFlashFallback,
   AuthType,
-  type ActiveFile,
+  type OpenFiles,
   ideContext,
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from '../config/auth.js';
@@ -162,12 +162,12 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
   const [userTier, setUserTier] = useState<UserTierId | undefined>(undefined);
   const [showEscapePrompt, setShowEscapePrompt] = useState(false);
   const [clearBufferFn, setClearBufferFn] = useState<(() => void) | null>(null);
-  const [activeFile, setActiveFile] = useState<ActiveFile | undefined>();
+  const [openFiles, setOpenFiles] = useState<OpenFiles | undefined>();
 
   useEffect(() => {
-    const unsubscribe = ideContext.subscribeToActiveFile(setActiveFile);
+    const unsubscribe = ideContext.subscribeToOpenFiles(setOpenFiles);
     // Set the initial value
-    setActiveFile(ideContext.getActiveFileContext());
+    setOpenFiles(ideContext.getOpenFilesContext());
     return unsubscribe;
   }, []);
 
@@ -217,26 +217,11 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
 
   // Sync user tier from config when authentication changes
   useEffect(() => {
-    const syncUserTier = async () => {
-      try {
-        const configUserTier = await config.getUserTier();
-        if (configUserTier !== userTier) {
-          setUserTier(configUserTier);
-        }
-      } catch (error) {
-        // Silently fail - this is not critical functionality
-        // Only log in debug mode to avoid cluttering the console
-        if (config.getDebugMode()) {
-          console.debug('Failed to sync user tier:', error);
-        }
-      }
-    };
-
     // Only sync when not currently authenticating
     if (!isAuthenticating) {
-      syncUserTier();
+      setUserTier(config.getGeminiClient()?.getUserTier());
     }
-  }, [config, userTier, isAuthenticating]);
+  }, [config, isAuthenticating]);
 
   const {
     isEditorDialogOpen,
@@ -324,7 +309,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
         config.getContentGeneratorConfig().authType ===
         AuthType.LOGIN_WITH_GOOGLE
       ) {
-        // Use actual user tier if available, otherwise default to FREE tier behavior (safe default)
+        // Use actual user tier if available; otherwise, default to FREE tier behavior (safe default)
         const isPaidTier =
           userTier === UserTierId.LEGACY || userTier === UserTierId.STANDARD;
 
@@ -941,7 +926,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                     </Text>
                   ) : (
                     <ContextSummaryDisplay
-                      activeFile={activeFile}
+                      openFiles={openFiles}
                       geminiMdFileCount={geminiMdFileCount}
                       contextFileNames={contextFileNames}
                       mcpServers={config.getMcpServers()}
