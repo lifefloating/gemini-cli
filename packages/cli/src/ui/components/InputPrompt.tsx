@@ -239,25 +239,24 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         }
 
         // Handle double ESC for clearing input
-        setEscPressCount((prev) => {
-          const newCount = prev + 1;
-          if (newCount === 1) {
-            setShowEscapePrompt(true);
-            if (escapeTimerRef.current) {
-              clearTimeout(escapeTimerRef.current);
-            }
-            escapeTimerRef.current = setTimeout(() => {
-              resetEscapeState();
-            }, 1000);
-            return newCount;
-          } else if (newCount >= 2) {
-            buffer.setText('');
-            resetCompletionState();
-            resetEscapeState();
-            return 0;
+        if (escPressCount === 0) {
+          if (buffer.text.trim() === '') {
+            return;
           }
-          return newCount;
-        });
+          setEscPressCount(1);
+          setShowEscapePrompt(true);
+          if (escapeTimerRef.current) {
+            clearTimeout(escapeTimerRef.current);
+          }
+          escapeTimerRef.current = setTimeout(() => {
+            resetEscapeState();
+          }, 500);
+        } else {
+          // clear input and immediately reset state
+          buffer.setText('');
+          resetCompletionState();
+          resetEscapeState();
+        }
         return;
       }
 
