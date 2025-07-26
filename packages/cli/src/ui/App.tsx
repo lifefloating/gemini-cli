@@ -554,6 +554,11 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
   }, [ctrlCPressedOnce, handleExit]);
 
   useInput((input: string, key: InkKeyType) => {
+    // if ESC key, don't handle it in App, let InputPrompt handle it
+    if (key.escape) {
+      return;
+    }
+
     let enteringConstrainHeightMode = false;
     if (!constrainHeight) {
       // Automatically re-enter constrain height mode if the user types
