@@ -964,9 +964,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                       Press Ctrl+D again to exit.
                     </Text>
                   ) : showEscapePrompt ? (
-                    <Text color={Colors.Gray}>
-                      Press Esc again to clear.
-                    </Text>
+                    <Text color={Colors.Gray}>Press Esc again to clear.</Text>
                   ) : (
                     <ContextSummaryDisplay
                       ideContext={ideContextState}
