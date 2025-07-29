@@ -95,12 +95,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   }, [showEscapePrompt, onEscapePromptChange]);
 
   // Clear escape prompt timer on unmount
-  useEffect(() => {
-    return () => {
-      if (escapeTimerRef.current) {
-        clearTimeout(escapeTimerRef.current);
-      }
-    };
+  useEffect(() => () => {
+    if (escapeTimerRef.current) {
+      clearTimeout(escapeTimerRef.current);
+    }
   }, []);
 
   const handleSubmitAndClear = useCallback(
