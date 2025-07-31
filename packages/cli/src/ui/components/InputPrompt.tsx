@@ -67,8 +67,19 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   const [showEscapePrompt, setShowEscapePrompt] = useState(false);
   const escapeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [dirs, setDirs] = useState<readonly string[]>(
+    config.getWorkspaceContext().getDirectories(),
+  );
+  const dirsChanged = config.getWorkspaceContext().getDirectories();
+  useEffect(() => {
+    if (dirs.length !== dirsChanged.length) {
+      setDirs(dirsChanged);
+    }
+  }, [dirs.length, dirsChanged]);
+
   const completion = useCompletion(
     buffer,
+    dirs,
     config.getTargetDir(),
     slashCommands,
     commandContext,
