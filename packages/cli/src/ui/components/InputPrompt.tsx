@@ -41,7 +41,6 @@ export interface InputPromptProps {
   shellModeActive: boolean;
   setShellModeActive: (value: boolean) => void;
   onEscapePromptChange?: (showPrompt: boolean) => void;
-  onCtrlCWithEmptyBuffer?: () => void;
   vimHandleInput?: (key: Key) => boolean;
 }
 
@@ -60,7 +59,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   shellModeActive,
   setShellModeActive,
   onEscapePromptChange,
-  onCtrlCWithEmptyBuffer,
   vimHandleInput,
 }) => {
   const [justNavigatedHistory, setJustNavigatedHistory] = useState(false);
@@ -262,7 +260,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       }
 
       if (key.name === 'escape') {
-        // Handle existing ESC functionality first
         if (reverseSearchActive) {
           setReverseSearchActive(false);
           reverseSearchCompletion.resetCompletionState();
@@ -290,7 +287,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
         // Handle double ESC for clearing input
         if (escPressCount === 0) {
-          if (buffer.text.trim() === '') {
+          if (buffer.text === '') {
             return;
           }
           setEscPressCount(1);
@@ -466,14 +463,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         buffer.moveToOffset(cpLen(buffer.text));
         return;
       }
-      // Ctrl+C (Clear input or trigger exit)
+      // Ctrl+C (Clear input)
       if (key.ctrl && key.name === 'c') {
         if (buffer.text.length > 0) {
           buffer.setText('');
           resetCompletionState();
-        } else if (onCtrlCWithEmptyBuffer) {
-          // Buffer is empty, notify parent component to handle exit
-          onCtrlCWithEmptyBuffer();
         }
         return;
       }
@@ -520,7 +514,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       escPressCount,
       showEscapePrompt,
       resetEscapeState,
-      onCtrlCWithEmptyBuffer,
       vimHandleInput,
       reverseSearchActive,
       textBeforeReverseSearch,

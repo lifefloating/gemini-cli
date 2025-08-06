@@ -565,12 +565,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     [handleSlashCommand],
   );
 
-  const handleCtrlCWithEmptyBuffer = useCallback(() => {
-    handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
-  }, [ctrlCPressedOnce, handleExit]);
-
   useInput((input: string, key: InkKeyType) => {
-    // if ESC key, don't handle it in App, let InputPrompt handle it
     if (key.escape) {
       return;
     }
@@ -1034,7 +1029,6 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
                   shellModeActive={shellModeActive}
                   setShellModeActive={setShellModeActive}
                   onEscapePromptChange={handleEscapePromptChange}
-                  onCtrlCWithEmptyBuffer={handleCtrlCWithEmptyBuffer}
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}

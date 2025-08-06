@@ -1207,7 +1207,7 @@ describe('InputPrompt', () => {
       await wait();
 
       expect(props.buffer.setText).toHaveBeenCalledWith('');
-      expect(mockSlashCompletion.resetCompletionState).toHaveBeenCalled();
+      expect(mockCommandCompletion.resetCompletionState).toHaveBeenCalled();
       unmount();
     });
 
@@ -1245,8 +1245,8 @@ describe('InputPrompt', () => {
     });
 
     it('should handle ESC when completion suggestions are showing', async () => {
-      mockedUseSlashCompletion.mockReturnValue({
-        ...mockSlashCompletion,
+      mockedUseCommandCompletion.mockReturnValue({
+        ...mockCommandCompletion,
         showSuggestions: true,
         suggestions: [{ label: 'suggestion', value: 'suggestion' }],
       });
@@ -1257,7 +1257,7 @@ describe('InputPrompt', () => {
       stdin.write('\x1B');
       await wait();
 
-      expect(mockSlashCompletion.resetCompletionState).toHaveBeenCalled();
+      expect(mockCommandCompletion.resetCompletionState).toHaveBeenCalled();
       unmount();
     });
 
