@@ -282,6 +282,9 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     try {
       const { memoryContent, fileCount } = await loadHierarchicalGeminiMemory(
         process.cwd(),
+        settings.merged.loadMemoryFromIncludeDirectories
+          ? config.getWorkspaceContext().getDirectories()
+          : [],
         config.getDebugMode(),
         config.getFileService(),
         settings.merged,
@@ -486,6 +489,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     openPrivacyNotice,
     toggleVimEnabled,
     setIsProcessing,
+    setGeminiMdFileCount,
   );
 
   const {
@@ -507,6 +511,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     performMemoryRefresh,
     modelSwitchedFromQuotaError,
     setModelSwitchedFromQuotaError,
+    refreshStatic,
   );
 
   // Input handling
@@ -617,7 +622,7 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
     if (config) {
       setGeminiMdFileCount(config.getGeminiMdFileCount());
     }
-  }, [config]);
+  }, [config, config.getGeminiMdFileCount]);
 
   const logger = useLogger();
   const [userMessages, setUserMessages] = useState<string[]>([]);
