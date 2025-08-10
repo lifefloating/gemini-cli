@@ -459,7 +459,7 @@ class GrepToolInvocation extends BaseToolInvocation<
     path: string; // Expects absolute path
     include?: string;
     signal: AbortSignal;
-  }  ): Promise<{ matches: GrepMatch[]; hasLongLinesWarning: boolean }> {
+  }): Promise<{ matches: GrepMatch[]; hasLongLinesWarning: boolean }> {
     const { pattern, path: absolutePath, include } = options;
     let strategyUsed = 'none';
 
@@ -513,7 +513,10 @@ class GrepToolInvocation extends BaseToolInvocation<
                 );
             });
           });
-          return { matches: this.parseGrepOutput(output, absolutePath), hasLongLinesWarning: false };
+          return {
+            matches: this.parseGrepOutput(output, absolutePath),
+            hasLongLinesWarning: false,
+          };
         } catch (gitError: unknown) {
           console.debug(
             `GrepLogic: git grep failed: ${getErrorMessage(
@@ -595,7 +598,10 @@ class GrepToolInvocation extends BaseToolInvocation<
             child.on('error', onError);
             child.on('close', onClose);
           });
-          return { matches: this.parseGrepOutput(output, absolutePath), hasLongLinesWarning: false };
+          return {
+            matches: this.parseGrepOutput(output, absolutePath),
+            hasLongLinesWarning: false,
+          };
         } catch (grepError: unknown) {
           console.debug(
             `GrepLogic: System grep failed: ${getErrorMessage(
