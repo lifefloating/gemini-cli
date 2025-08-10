@@ -10,6 +10,8 @@ import path from 'path';
 import { EOL } from 'os';
 import { spawn } from 'child_process';
 import { globStream } from 'glob';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
 import {
   BaseDeclarativeTool,
   BaseToolInvocation,
@@ -24,7 +26,102 @@ import { getErrorMessage, isNodeError } from '../utils/errors.js';
 import { isGitRepository } from '../utils/gitUtils.js';
 import { Config } from '../config/config.js';
 
-// --- Interfaces ---
+/**
+ * Memory safety constants to prevent heap overflow
+ */
+const MEMORY_SAFETY = {
+  /** Maximum file size to process (100MB - reasonable for source code files) */
+  MAX_FILE_SIZE: 100 * 1024 * 1024,
+  /** Maximum number of files to process in JavaScript fallback */
+  MAX_FILES_TO_PROCESS: 10000,
+  /** Maximum number of matches to collect before stopping */
+  MAX_MATCHES: 10000,
+  /** Maximum number of matches per file */
+  MAX_MATCHES_PER_FILE: 500,
+  /** Check memory usage every N files */
+  MEMORY_CHECK_INTERVAL: 100,
+  /** Memory usage threshold (MB) */
+  MEMORY_THRESHOLD_MB: 1500,
+} as const;
+
+/**
+ * Check if memory usage is within safe limits
+ */
+function isMemoryUsageSafe(): boolean {
+  try {
+    const usage = process.memoryUsage();
+    const heapUsedMB = usage.heapUsed / 1024 / 1024;
+    return heapUsedMB < MEMORY_SAFETY.MEMORY_THRESHOLD_MB;
+  } catch {
+    // If we can't check memory, assume it's not safe
+    return false;
+  }
+}
+
+/**
+ * Stream search through a file without loading it entirely into memory
+ */
+async function searchFileStream(
+  filePath: string,
+  regex: RegExp,
+  basePath: string,
+  signal: AbortSignal,
+  maxMatches: number = MEMORY_SAFETY.MAX_MATCHES_PER_FILE,
+): Promise<GrepMatch[]> {
+  return new Promise((resolve, reject) => {
+    const matches: GrepMatch[] = [];
+    let lineNumber = 0;
+
+    const fileStream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = createInterface({
+      input: fileStream,
+      crlfDelay: Infinity,
+    });
+
+    const cleanup = () => {
+      rl.close();
+      fileStream.destroy();
+    };
+
+    const abortHandler = () => {
+      cleanup();
+      reject(new Error('Search aborted'));
+    };
+
+    signal.addEventListener('abort', abortHandler, { once: true });
+
+    rl.on('line', (line) => {
+      lineNumber++;
+
+      if (regex.test(line)) {
+        matches.push({
+          filePath:
+            path.relative(basePath, filePath) || path.basename(filePath),
+          lineNumber,
+          line,
+        });
+
+        // Stop if we've found enough matches in this file
+        if (matches.length >= maxMatches) {
+          cleanup();
+          signal.removeEventListener('abort', abortHandler);
+          resolve(matches);
+        }
+      }
+    });
+
+    rl.on('error', (error) => {
+      cleanup();
+      signal.removeEventListener('abort', abortHandler);
+      reject(error);
+    });
+
+    rl.on('close', () => {
+      signal.removeEventListener('abort', abortHandler);
+      resolve(matches);
+    });
+  });
+}
 
 /**
  * Parameters for the GrepTool
@@ -177,9 +274,21 @@ class GrepToolInvocation extends BaseToolInvocation<
       const matchCount = allMatches.length;
       const matchTerm = matchCount === 1 ? 'match' : 'matches';
 
-      let llmContent = `Found ${matchCount} ${matchTerm} for pattern "${this.params.pattern}" ${searchLocationDescription}${this.params.include ? ` (filter: "${this.params.include}")` : ''}:
----
-`;
+      // Check if we hit any limits and add appropriate warnings
+      const limitWarnings: string[] = [];
+      if (matchCount >= MEMORY_SAFETY.MAX_MATCHES) {
+        limitWarnings.push(
+          `⚠️  Search stopped at ${MEMORY_SAFETY.MAX_MATCHES} matches limit for memory safety`,
+        );
+      }
+
+      let llmContent = `Found ${matchCount} ${matchTerm} for pattern "${this.params.pattern}" ${searchLocationDescription}${this.params.include ? ` (filter: "${this.params.include}")` : ''}`;
+
+      if (limitWarnings.length > 0) {
+        llmContent += `\n\n${limitWarnings.join('\n')}`;
+      }
+
+      llmContent += `:\n---\n`;
 
       for (const filePath in matchesByFile) {
         llmContent += `File: ${filePath}\n`;
@@ -190,9 +299,14 @@ class GrepToolInvocation extends BaseToolInvocation<
         llmContent += '---\n';
       }
 
+      let displayMessage = `Found ${matchCount} ${matchTerm}`;
+      if (limitWarnings.length > 0) {
+        displayMessage += ' (search limited)';
+      }
+
       return {
         llmContent: llmContent.trim(),
-        returnDisplay: `Found ${matchCount} ${matchTerm}`,
+        returnDisplay: displayMessage,
       };
     } catch (error) {
       console.error(`Error during GrepLogic execution: ${error}`);
@@ -329,7 +443,7 @@ class GrepToolInvocation extends BaseToolInvocation<
     let strategyUsed = 'none';
 
     try {
-      // --- Strategy 1: git grep ---
+      // Strategy 1: git grep
       const isGit = isGitRepository(absolutePath);
       const gitAvailable = isGit && (await this.isCommandAvailable('git'));
 
@@ -383,7 +497,7 @@ class GrepToolInvocation extends BaseToolInvocation<
         }
       }
 
-      // --- Strategy 2: System grep ---
+      // Strategy 2: System grep
       const grepAvailable = await this.isCommandAvailable('grep');
       if (grepAvailable) {
         strategyUsed = 'system grep';
@@ -465,9 +579,9 @@ class GrepToolInvocation extends BaseToolInvocation<
         }
       }
 
-      // --- Strategy 3: Pure JavaScript Fallback ---
+      // Strategy 3: Memory-Safe JavaScript Fallback
       console.debug(
-        'GrepLogic: Falling back to JavaScript grep implementation.',
+        'GrepLogic: Falling back to memory-safe JavaScript grep implementation.',
       );
       strategyUsed = 'javascript fallback';
       const globPattern = include ? include : '**/*';
@@ -477,7 +591,18 @@ class GrepToolInvocation extends BaseToolInvocation<
         'bower_components/**',
         '.svn/**',
         '.hg/**',
-      ]; // Use glob patterns for ignores here
+        '*.log',
+        '*.bin',
+        '*.exe',
+        '*.dll',
+        '*.so',
+        '*.dylib',
+        '*.jar',
+        '*.class',
+        '*.pyc',
+        '*.pyo',
+        '*.wasm',
+      ];
 
       const filesStream = globStream(globPattern, {
         cwd: absolutePath,
@@ -490,23 +615,87 @@ class GrepToolInvocation extends BaseToolInvocation<
 
       const regex = new RegExp(pattern, 'i');
       const allMatches: GrepMatch[] = [];
+      let filesProcessed = 0;
+      let skippedFiles = 0;
+      let memoryWarning = false;
 
       for await (const filePath of filesStream) {
         const fileAbsolutePath = filePath as string;
+
+        // Check if we've hit our limits
+        if (filesProcessed >= MEMORY_SAFETY.MAX_FILES_TO_PROCESS) {
+          console.debug(
+            `GrepLogic: Reached maximum file limit (${MEMORY_SAFETY.MAX_FILES_TO_PROCESS}). Stopping search.`,
+          );
+          break;
+        }
+
+        if (allMatches.length >= MEMORY_SAFETY.MAX_MATCHES) {
+          console.debug(
+            `GrepLogic: Reached maximum matches limit (${MEMORY_SAFETY.MAX_MATCHES}). Stopping search.`,
+          );
+          break;
+        }
+
+        // Check memory usage periodically
+        if (
+          filesProcessed % MEMORY_SAFETY.MEMORY_CHECK_INTERVAL === 0 &&
+          filesProcessed > 0
+        ) {
+          if (!isMemoryUsageSafe()) {
+            memoryWarning = true;
+            console.debug(
+              `GrepLogic: Memory usage approaching limit. Stopping search for safety.`,
+            );
+            break;
+          }
+        }
+
         try {
-          const content = await fsPromises.readFile(fileAbsolutePath, 'utf8');
-          const lines = content.split(/\r?\n/);
-          lines.forEach((line, index) => {
-            if (regex.test(line)) {
-              allMatches.push({
-                filePath:
-                  path.relative(absolutePath, fileAbsolutePath) ||
-                  path.basename(fileAbsolutePath),
-                lineNumber: index + 1,
-                line,
-              });
-            }
-          });
+          // Check file size before processing
+          const stats = await fsPromises.stat(fileAbsolutePath);
+          if (stats.size > MEMORY_SAFETY.MAX_FILE_SIZE) {
+            skippedFiles++;
+            console.debug(
+              `GrepLogic: Skipping large file ${fileAbsolutePath} (${(stats.size / 1024 / 1024).toFixed(1)}MB)`,
+            );
+            continue;
+          }
+
+          // For small files (< 1MB), use the fast approach
+          if (stats.size < 1024 * 1024) {
+            const content = await fsPromises.readFile(fileAbsolutePath, 'utf8');
+            const lines = content.split(/\r?\n/);
+            let fileMatchCount = 0;
+
+            lines.forEach((line, index) => {
+              if (
+                fileMatchCount < MEMORY_SAFETY.MAX_MATCHES_PER_FILE &&
+                regex.test(line)
+              ) {
+                allMatches.push({
+                  filePath:
+                    path.relative(absolutePath, fileAbsolutePath) ||
+                    path.basename(fileAbsolutePath),
+                  lineNumber: index + 1,
+                  line,
+                });
+                fileMatchCount++;
+              }
+            });
+          } else {
+            // For larger files, use streaming approach
+            const fileMatches = await searchFileStream(
+              fileAbsolutePath,
+              regex,
+              absolutePath,
+              options.signal,
+              MEMORY_SAFETY.MAX_MATCHES_PER_FILE,
+            );
+            allMatches.push(...fileMatches);
+          }
+
+          filesProcessed++;
         } catch (readError: unknown) {
           // Ignore errors like permission denied or file gone during read
           if (!isNodeError(readError) || readError.code !== 'ENOENT') {
@@ -519,6 +708,19 @@ class GrepToolInvocation extends BaseToolInvocation<
         }
       }
 
+      // Log summary information
+      if (skippedFiles > 0) {
+        console.debug(
+          `GrepLogic: Skipped ${skippedFiles} large files to prevent memory issues.`,
+        );
+      }
+
+      if (memoryWarning) {
+        console.debug(
+          `GrepLogic: Search stopped early due to memory constraints. Processed ${filesProcessed} files, found ${allMatches.length} matches.`,
+        );
+      }
+
       return allMatches;
     } catch (error: unknown) {
       console.error(
@@ -526,18 +728,16 @@ class GrepToolInvocation extends BaseToolInvocation<
           error,
         )}`,
       );
-      throw error; // Re-throw
+      throw error;
     }
   }
 }
-
-// --- GrepLogic Class ---
 
 /**
  * Implementation of the Grep tool logic (moved from CLI)
  */
 export class GrepTool extends BaseDeclarativeTool<GrepToolParams, ToolResult> {
-  static readonly Name = 'search_file_content'; // Keep static name
+  static readonly Name = 'search_file_content';
 
   constructor(private readonly config: Config) {
     super(
