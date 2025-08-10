@@ -30,18 +30,20 @@ import { Config } from '../config/config.js';
  * Memory safety constants to prevent heap overflow
  */
 const MEMORY_SAFETY = {
-  /** Maximum file size to process (100MB - reasonable for source code files) */
-  MAX_FILE_SIZE: 100 * 1024 * 1024,
+  /** Maximum file size to process (50MB - conservative limit for memory safety) */
+  MAX_FILE_SIZE: 50 * 1024 * 1024,
   /** Maximum number of files to process in JavaScript fallback */
   MAX_FILES_TO_PROCESS: 10000,
   /** Maximum number of matches to collect before stopping */
   MAX_MATCHES: 10000,
   /** Maximum number of matches per file */
   MAX_MATCHES_PER_FILE: 500,
-  /** Check memory usage every N files */
-  MEMORY_CHECK_INTERVAL: 100,
-  /** Memory usage threshold (MB) */
-  MEMORY_THRESHOLD_MB: 1500,
+  /** Check memory usage every N files (more frequent checks) */
+  MEMORY_CHECK_INTERVAL: 50,
+  /** Memory usage threshold (MB) - conservative limit for broad compatibility */
+  MEMORY_THRESHOLD_MB: 1000,
+  /** Maximum line length to prevent memory spikes from very long lines (matches fileUtils limit) */
+  MAX_LINE_LENGTH: 2000,
 } as const;
 
 /**
@@ -67,10 +69,11 @@ async function searchFileStream(
   basePath: string,
   signal: AbortSignal,
   maxMatches: number = MEMORY_SAFETY.MAX_MATCHES_PER_FILE,
-): Promise<GrepMatch[]> {
+): Promise<{ matches: GrepMatch[]; hasLongLines: boolean }> {
   return new Promise((resolve, reject) => {
     const matches: GrepMatch[] = [];
     let lineNumber = 0;
+    let hasLongLines = false;
 
     const fileStream = createReadStream(filePath, { encoding: 'utf8' });
     const rl = createInterface({
@@ -93,6 +96,14 @@ async function searchFileStream(
     rl.on('line', (line) => {
       lineNumber++;
 
+      // Warn about extremely long lines but continue processing
+      if (line.length > MEMORY_SAFETY.MAX_LINE_LENGTH) {
+        hasLongLines = true;
+        console.debug(
+          `GrepLogic: Warning - Found long line (${line.length} chars) in ${filePath} at line ${lineNumber}. Search continues but performance may be affected.`,
+        );
+      }
+
       if (regex.test(line)) {
         matches.push({
           filePath:
@@ -105,7 +116,8 @@ async function searchFileStream(
         if (matches.length >= maxMatches) {
           cleanup();
           signal.removeEventListener('abort', abortHandler);
-          resolve(matches);
+          resolve({ matches, hasLongLines });
+          return;
         }
       }
     });
@@ -118,7 +130,7 @@ async function searchFileStream(
 
     rl.on('close', () => {
       signal.removeEventListener('abort', abortHandler);
-      resolve(matches);
+      resolve({ matches, hasLongLines });
     });
   });
 }
@@ -222,8 +234,9 @@ class GrepToolInvocation extends BaseToolInvocation<
 
       // Collect matches from all search directories
       let allMatches: GrepMatch[] = [];
+      let hasLongLinesWarning = false;
       for (const searchDir of searchDirectories) {
-        const matches = await this.performGrepSearch({
+        const searchResult = await this.performGrepSearch({
           pattern: this.params.pattern,
           path: searchDir,
           include: this.params.include,
@@ -233,12 +246,15 @@ class GrepToolInvocation extends BaseToolInvocation<
         // Add directory prefix if searching multiple directories
         if (searchDirectories.length > 1) {
           const dirName = path.basename(searchDir);
-          matches.forEach((match) => {
+          searchResult.matches.forEach((match) => {
             match.filePath = path.join(dirName, match.filePath);
           });
         }
 
-        allMatches = allMatches.concat(matches);
+        allMatches = allMatches.concat(searchResult.matches);
+        if (searchResult.hasLongLinesWarning) {
+          hasLongLinesWarning = true;
+        }
       }
 
       let searchLocationDescription: string;
@@ -278,7 +294,12 @@ class GrepToolInvocation extends BaseToolInvocation<
       const limitWarnings: string[] = [];
       if (matchCount >= MEMORY_SAFETY.MAX_MATCHES) {
         limitWarnings.push(
-          `⚠️  Search stopped at ${MEMORY_SAFETY.MAX_MATCHES} matches limit for memory safety`,
+          `⚠️  Search stopped at ${MEMORY_SAFETY.MAX_MATCHES} matches limit for memory safety. Try narrowing your search pattern or using the 'include' filter to search specific file types.`,
+        );
+      }
+      if (hasLongLinesWarning) {
+        limitWarnings.push(
+          `⚠️  Some files contain very long lines (>${MEMORY_SAFETY.MAX_LINE_LENGTH} characters). Performance may be affected.`,
         );
       }
 
@@ -431,16 +452,21 @@ class GrepToolInvocation extends BaseToolInvocation<
   /**
    * Performs the actual search using the prioritized strategies.
    * @param options Search options including pattern, absolute path, and include glob.
-   * @returns A promise resolving to an array of match objects.
+   * @returns A promise resolving to search results with matches and warning flags.
    */
   private async performGrepSearch(options: {
     pattern: string;
     path: string; // Expects absolute path
     include?: string;
     signal: AbortSignal;
-  }): Promise<GrepMatch[]> {
+  }  ): Promise<{ matches: GrepMatch[]; hasLongLinesWarning: boolean }> {
     const { pattern, path: absolutePath, include } = options;
     let strategyUsed = 'none';
+
+    // Check if operation was already aborted
+    if (options.signal.aborted) {
+      throw new Error('Search aborted');
+    }
 
     try {
       // Strategy 1: git grep
@@ -487,7 +513,7 @@ class GrepToolInvocation extends BaseToolInvocation<
                 );
             });
           });
-          return this.parseGrepOutput(output, absolutePath);
+          return { matches: this.parseGrepOutput(output, absolutePath), hasLongLinesWarning: false };
         } catch (gitError: unknown) {
           console.debug(
             `GrepLogic: git grep failed: ${getErrorMessage(
@@ -569,7 +595,7 @@ class GrepToolInvocation extends BaseToolInvocation<
             child.on('error', onError);
             child.on('close', onClose);
           });
-          return this.parseGrepOutput(output, absolutePath);
+          return { matches: this.parseGrepOutput(output, absolutePath), hasLongLinesWarning: false };
         } catch (grepError: unknown) {
           console.debug(
             `GrepLogic: System grep failed: ${getErrorMessage(
@@ -618,6 +644,7 @@ class GrepToolInvocation extends BaseToolInvocation<
       let filesProcessed = 0;
       let skippedFiles = 0;
       let memoryWarning = false;
+      let hasLongLinesWarning = false;
 
       for await (const filePath of filesStream) {
         const fileAbsolutePath = filePath as string;
@@ -657,7 +684,7 @@ class GrepToolInvocation extends BaseToolInvocation<
           if (stats.size > MEMORY_SAFETY.MAX_FILE_SIZE) {
             skippedFiles++;
             console.debug(
-              `GrepLogic: Skipping large file ${fileAbsolutePath} (${(stats.size / 1024 / 1024).toFixed(1)}MB)`,
+              `GrepLogic: Skipping large file ${fileAbsolutePath} (${(stats.size / 1024 / 1024).toFixed(1)}MB) - exceeds ${(MEMORY_SAFETY.MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB limit for memory safety`,
             );
             continue;
           }
@@ -669,6 +696,14 @@ class GrepToolInvocation extends BaseToolInvocation<
             let fileMatchCount = 0;
 
             lines.forEach((line, index) => {
+              // Check for long lines in small files too
+              if (line.length > MEMORY_SAFETY.MAX_LINE_LENGTH) {
+                hasLongLinesWarning = true;
+                console.debug(
+                  `GrepLogic: Warning - Found long line (${line.length} chars) in ${fileAbsolutePath} at line ${index + 1}. Performance may be affected.`,
+                );
+              }
+
               if (
                 fileMatchCount < MEMORY_SAFETY.MAX_MATCHES_PER_FILE &&
                 regex.test(line)
@@ -685,14 +720,17 @@ class GrepToolInvocation extends BaseToolInvocation<
             });
           } else {
             // For larger files, use streaming approach
-            const fileMatches = await searchFileStream(
+            const streamResult = await searchFileStream(
               fileAbsolutePath,
               regex,
               absolutePath,
               options.signal,
               MEMORY_SAFETY.MAX_MATCHES_PER_FILE,
             );
-            allMatches.push(...fileMatches);
+            allMatches.push(...streamResult.matches);
+            if (streamResult.hasLongLines) {
+              hasLongLinesWarning = true;
+            }
           }
 
           filesProcessed++;
@@ -708,20 +746,22 @@ class GrepToolInvocation extends BaseToolInvocation<
         }
       }
 
-      // Log summary information
-      if (skippedFiles > 0) {
-        console.debug(
-          `GrepLogic: Skipped ${skippedFiles} large files to prevent memory issues.`,
-        );
+      // Log summary information and add user-friendly warnings
+      if (skippedFiles > 0 || memoryWarning) {
+        if (skippedFiles > 0) {
+          console.debug(
+            `GrepLogic: Skipped ${skippedFiles} large files (>${(MEMORY_SAFETY.MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB each) to prevent memory issues. Consider searching within specific directories or file types.`,
+          );
+        }
+
+        if (memoryWarning) {
+          console.debug(
+            `GrepLogic: Search stopped early due to memory constraints. Processed ${filesProcessed} files, found ${allMatches.length} matches. Try searching within specific directories or using more specific patterns.`,
+          );
+        }
       }
 
-      if (memoryWarning) {
-        console.debug(
-          `GrepLogic: Search stopped early due to memory constraints. Processed ${filesProcessed} files, found ${allMatches.length} matches.`,
-        );
-      }
-
-      return allMatches;
+      return { matches: allMatches, hasLongLinesWarning };
     } catch (error: unknown) {
       console.error(
         `GrepLogic: Error in performGrepSearch (Strategy: ${strategyUsed}): ${getErrorMessage(
@@ -824,7 +864,7 @@ export class GrepTool extends BaseDeclarativeTool<GrepToolParams, ToolResult> {
     try {
       new RegExp(params.pattern);
     } catch (error) {
-      return `Invalid regular expression pattern provided: ${params.pattern}. Error: ${getErrorMessage(error)}`;
+      return `Invalid regular expression pattern: "${params.pattern}". ${getErrorMessage(error)}. Please check your pattern syntax and try again.`;
     }
 
     // Only validate path if one is provided

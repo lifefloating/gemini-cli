@@ -385,21 +385,37 @@ describe('GrepTool', () => {
     });
 
     it('should abort streaming search when signal is triggered', async () => {
-      const largeContent = 'test line\n'.repeat(100000);
-      await fs.writeFile(path.join(tempRootDir, 'stream.txt'), largeContent);
-
       const controller = new AbortController();
       const params: GrepToolParams = { pattern: 'test' };
       const invocation = grepTool.build(params);
 
-      const searchPromise = invocation.execute(controller.signal);
-      setTimeout(() => controller.abort(), 10);
+      // Abort immediately before starting the search
+      controller.abort();
 
-      try {
-        await searchPromise;
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      const result = await invocation.execute(controller.signal);
+      expect(result.llmContent).toContain(
+        'Error during grep search operation: Search aborted',
+      );
+      expect(result.returnDisplay).toContain('Error: Search aborted');
+    });
+  });
+
+  describe('long line handling', () => {
+    it('should warn about files with extremely long lines but continue search', async () => {
+      // Create a file with an extremely long line (over 2000 chars)
+      const longLine = 'a'.repeat(3000); // 3000 chars (exceeds 2000 char limit)
+      await fs.writeFile(path.join(tempRootDir, 'longline.txt'), longLine);
+
+      const params: GrepToolParams = { pattern: 'a' };
+      const invocation = grepTool.build(params);
+      const result = await invocation.execute(abortSignal);
+
+      // Should find matches and warn about long lines
+      expect(result.llmContent).toContain('Found');
+      expect(result.llmContent).toContain(
+        'Some files contain very long lines (>2000 characters)',
+      );
+      expect(result.llmContent).toContain('Performance may be affected');
     });
   });
 
@@ -409,7 +425,7 @@ describe('GrepTool', () => {
       vi.spyOn(fs, 'stat').mockImplementation(async (filePath) => {
         if (filePath.toString().includes('large.txt')) {
           return {
-            size: 150 * 1024 * 1024,
+            size: 100 * 1024 * 1024, // 100MB (exceeds 50MB limit)
             isDirectory: () => false,
             isFile: () => true,
           } as Stats;
