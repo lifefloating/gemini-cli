@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { DiffRenderer } from './DiffRenderer.js';
 import { Colors } from '../../colors.js';
 import { RenderInline } from '../../utils/InlineMarkdownRenderer.js';
@@ -21,6 +21,7 @@ import {
   RadioSelectItem,
 } from '../shared/RadioButtonSelect.js';
 import { MaxSizedBox } from '../shared/MaxSizedBox.js';
+import { useKeypress } from '../../hooks/useKeypress.js';
 
 export interface ToolConfirmationMessageProps {
   confirmationDetails: ToolCallConfirmationDetails;
@@ -45,7 +46,7 @@ export const ToolConfirmationMessage: React.FC<
   const handleConfirm = async (outcome: ToolConfirmationOutcome) => {
     if (confirmationDetails.type === 'edit') {
       const ideClient = config?.getIdeClient();
-      if (config?.getIdeMode() && config?.getIdeModeFeature()) {
+      if (config?.getIdeMode()) {
         const cliOutcome =
           outcome === ToolConfirmationOutcome.Cancel ? 'rejected' : 'accepted';
         await ideClient?.resolveDiffFromCli(
@@ -57,12 +58,15 @@ export const ToolConfirmationMessage: React.FC<
     onConfirm(outcome);
   };
 
-  useInput((input, key) => {
-    if (!isFocused) return;
-    if (key.escape || (key.ctrl && (input === 'c' || input === 'C'))) {
-      handleConfirm(ToolConfirmationOutcome.Cancel);
-    }
-  });
+  useKeypress(
+    (key) => {
+      if (!isFocused) return;
+      if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+        handleConfirm(ToolConfirmationOutcome.Cancel);
+      }
+    },
+    { isActive: isFocused },
+  );
 
   const handleSelect = (item: ToolConfirmationOutcome) => handleConfirm(item);
 
@@ -133,7 +137,7 @@ export const ToolConfirmationMessage: React.FC<
         value: ToolConfirmationOutcome.ProceedAlways,
       },
     );
-    if (config?.getIdeMode() && config?.getIdeModeFeature()) {
+    if (config?.getIdeMode()) {
       options.push({
         label: 'No (esc)',
         value: ToolConfirmationOutcome.Cancel,
