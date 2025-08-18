@@ -51,7 +51,7 @@ ${folderStructure}`;
  * @returns A promise that resolves to an array of `Part` objects containing environment information.
  */
 export async function getEnvironmentContext(config: Config): Promise<Part[]> {
-  const today = new Date().toLocaleDateString('en-US', {
+  const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -62,7 +62,7 @@ export async function getEnvironmentContext(config: Config): Promise<Part[]> {
 
   const context = `
 This is the Gemini CLI. We are setting up the context for our chat.
-Today's date is ${today}.
+Today's date is ${today} (formatted as: weekday, month day, year in the user's locale).
 My operating system is: ${platform}
 ${directoryContext}
         `.trim();
