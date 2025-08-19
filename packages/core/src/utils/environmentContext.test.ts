@@ -107,11 +107,7 @@ describe('getEnvironmentContext', () => {
     const context = parts[0].text;
 
     expect(context).toContain("Today's date is");
-    console.log("111111")
-    console.log(context)
-    expect(context).toContain(
-      "(formatted as: weekday, month day, year in the user's locale)",
-    );
+    expect(context).toContain("(formatted according to the user's locale)");
     expect(context).toContain(`My operating system is: ${process.platform}`);
     expect(context).toContain(
       "I'm currently working in the directory: /test/dir",
