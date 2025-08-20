@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RipGrepTool, RipGrepToolParams } from './ripGrep.js';
 import path from 'path';
 import fs from 'fs/promises';
-import os from 'os';
+import os, { EOL } from 'os';
 import { Config } from '../config/config.js';
 import { createMockWorkspaceContext } from '../test-utils/mockWorkspaceContext.js';
 import { spawn, ChildProcess } from 'child_process';
@@ -173,8 +173,7 @@ describe('RipGrepTool', () => {
     it('should find matches for a simple pattern in all files', async () => {
       mockSpawn.mockImplementationOnce(
         createMockSpawn({
-          outputData:
-            'fileA.txt:1:hello world\nfileA.txt:2:second line with world\nsub/fileC.txt:1:another world in sub dir\n',
+          outputData: `fileA.txt:1:hello world${EOL}fileA.txt:2:second line with world${EOL}sub/fileC.txt:1:another world in sub dir${EOL}`,
           exitCode: 0,
         }),
       );
@@ -199,7 +198,7 @@ describe('RipGrepTool', () => {
       // Setup specific mock for this test - searching in 'sub' should only return matches from that directory
       mockSpawn.mockImplementationOnce(
         createMockSpawn({
-          outputData: 'fileC.txt:1:another world in sub dir\n',
+          outputData: `fileC.txt:1:another world in sub dir${EOL}`,
           exitCode: 0,
         }),
       );
@@ -219,7 +218,7 @@ describe('RipGrepTool', () => {
       // Setup specific mock for this test
       mockSpawn.mockImplementationOnce(
         createMockSpawn({
-          outputData: 'fileB.js:2:function baz() { return "hello"; }\n',
+          outputData: `fileB.js:2:function baz() { return "hello"; }${EOL}`,
           exitCode: 0,
         }),
       );
@@ -269,7 +268,7 @@ describe('RipGrepTool', () => {
 
           if (onData) {
             // Only return match from the .js file in sub directory
-            onData(Buffer.from('another.js:1:const greeting = "hello";\n'));
+            onData(Buffer.from(`another.js:1:const greeting = "hello";${EOL}`));
           }
           if (onClose) {
             onClose(0);
@@ -338,7 +337,7 @@ describe('RipGrepTool', () => {
 
           if (onData) {
             // Return match for the regex pattern
-            onData(Buffer.from('fileB.js:1:const foo = "bar";\n'));
+            onData(Buffer.from(`fileB.js:1:const foo = "bar";${EOL}`));
           }
           if (onClose) {
             onClose(0);
@@ -387,7 +386,7 @@ describe('RipGrepTool', () => {
             // Return case-insensitive matches for 'HELLO'
             onData(
               Buffer.from(
-                'fileA.txt:1:hello world\nfileB.js:2:function baz() { return "hello"; }\n',
+                `fileA.txt:1:hello world${EOL}fileB.js:2:function baz() { return "hello"; }${EOL}`,
               ),
             );
           }
@@ -480,14 +479,14 @@ describe('RipGrepTool', () => {
                 'fileA.txt:1:hello world',
                 'fileA.txt:2:second line with world',
                 'sub/fileC.txt:1:another world in sub dir',
-              ].join('\n') + '\n';
+              ].join(EOL) + EOL;
           } else if (callCount === 2) {
             // Second directory (secondDir)
             outputData =
               [
                 'other.txt:2:world in second',
                 'another.js:1:function world() { return "test"; }',
-              ].join('\n') + '\n';
+              ].join(EOL) + EOL;
           }
 
           if (stdoutDataHandler && outputData) {
@@ -574,7 +573,7 @@ describe('RipGrepTool', () => {
           )?.[1];
 
           if (onData) {
-            onData(Buffer.from('fileC.txt:1:another world in sub dir\n'));
+            onData(Buffer.from(`fileC.txt:1:another world in sub dir${EOL}`));
           }
           if (onClose) {
             onClose(0);
@@ -787,7 +786,7 @@ describe('RipGrepTool', () => {
           if (onData) {
             onData(
               Buffer.from(
-                `${specialFileName}:1:hello world with special chars\n`,
+                `${specialFileName}:1:hello world with special chars${EOL}`,
               ),
             );
           }
@@ -841,7 +840,9 @@ describe('RipGrepTool', () => {
 
           if (onData) {
             onData(
-              Buffer.from('a/b/c/d/e/deep.txt:1:content in deep directory\n'),
+              Buffer.from(
+                `a/b/c/d/e/deep.txt:1:content in deep directory${EOL}`,
+              ),
             );
           }
           if (onClose) {
@@ -894,7 +895,9 @@ describe('RipGrepTool', () => {
 
           if (onData) {
             onData(
-              Buffer.from('code.js:1:function getName() { return "test"; }\n'),
+              Buffer.from(
+                `code.js:1:function getName() { return "test"; }${EOL}`,
+              ),
             );
           }
           if (onClose) {
@@ -946,7 +949,7 @@ describe('RipGrepTool', () => {
           if (onData) {
             onData(
               Buffer.from(
-                'case.txt:1:Hello World\ncase.txt:2:hello world\ncase.txt:3:HELLO WORLD\n',
+                `case.txt:1:Hello World${EOL}case.txt:2:hello world${EOL}case.txt:3:HELLO WORLD${EOL}`,
               ),
             );
           }
@@ -998,7 +1001,7 @@ describe('RipGrepTool', () => {
           )?.[1];
 
           if (onData) {
-            onData(Buffer.from('special.txt:1:Price: $19.99\n'));
+            onData(Buffer.from(`special.txt:1:Price: $19.99${EOL}`));
           }
           if (onClose) {
             onClose(0);
@@ -1057,7 +1060,7 @@ describe('RipGrepTool', () => {
           if (onData) {
             onData(
               Buffer.from(
-                'test.ts:1:typescript content\ntest.tsx:1:tsx content\n',
+                `test.ts:1:typescript content${EOL}test.tsx:1:tsx content${EOL}`,
               ),
             );
           }
@@ -1115,7 +1118,7 @@ describe('RipGrepTool', () => {
           )?.[1];
 
           if (onData) {
-            onData(Buffer.from('src/main.ts:1:source code\n'));
+            onData(Buffer.from(`src/main.ts:1:source code${EOL}`));
           }
           if (onClose) {
             onClose(0);
