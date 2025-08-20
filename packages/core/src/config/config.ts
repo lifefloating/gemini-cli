@@ -204,6 +204,8 @@ export interface ConfigParameters {
   interactive?: boolean;
   trustedFolder?: boolean;
   useRipgrep?: boolean;
+  shouldUseNodePtyShell?: boolean;
+  skipNextSpeakerCheck?: boolean;
 }
 
 export class Config {
@@ -270,6 +272,8 @@ export class Config {
   private readonly interactive: boolean;
   private readonly trustedFolder: boolean | undefined;
   private readonly useRipgrep: boolean;
+  private readonly shouldUseNodePtyShell: boolean;
+  private readonly skipNextSpeakerCheck: boolean;
   private initialized: boolean = false;
 
   constructor(params: ConfigParameters) {
@@ -338,6 +342,8 @@ export class Config {
     this.interactive = params.interactive ?? false;
     this.trustedFolder = params.trustedFolder;
     this.useRipgrep = params.useRipgrep ?? false;
+    this.shouldUseNodePtyShell = params.shouldUseNodePtyShell ?? false;
+    this.skipNextSpeakerCheck = params.skipNextSpeakerCheck ?? false;
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -348,10 +354,6 @@ export class Config {
     }
 
     logCliConfiguration(this, new StartSessionEvent(this));
-
-    if (this.getUsageStatisticsEnabled()) {
-      console.log('Data collection is disabled.');
-    }
   }
 
   /**
@@ -490,8 +492,8 @@ export class Config {
     return this.workspaceContext;
   }
 
-  getToolRegistry(): Promise<ToolRegistry> {
-    return Promise.resolve(this.toolRegistry);
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
   }
 
   getPromptRegistry(): PromptRegistry {
@@ -738,6 +740,14 @@ export class Config {
 
   getUseRipgrep(): boolean {
     return this.useRipgrep;
+  }
+
+  getShouldUseNodePtyShell(): boolean {
+    return this.shouldUseNodePtyShell;
+  }
+
+  getSkipNextSpeakerCheck(): boolean {
+    return this.skipNextSpeakerCheck;
   }
 
   async getGitService(): Promise<GitService> {
