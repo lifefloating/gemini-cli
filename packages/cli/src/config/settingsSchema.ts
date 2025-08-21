@@ -534,6 +534,16 @@ export const SETTINGS_SCHEMA = {
       'Use ripgrep for file content search instead of the fallback implementation. Provides faster search performance.',
     showInDialog: true,
   },
+  enablePromptCompletion: {
+    type: 'boolean',
+    label: 'Enable Prompt Completion',
+    category: 'General',
+    requiresRestart: true,
+    default: false,
+    description:
+      'Enable AI-powered prompt completion suggestions while typing.',
+    showInDialog: true,
+  },
 } as const;
 
 type InferSettings<T extends SettingsSchema> = {
