@@ -13,7 +13,31 @@ export async function readStdin(): Promise<string> {
 
     process.stdin.setEncoding('utf8');
 
-    const checkInitialState = () => {
+    function cleanup() {
+      clearTimeout(timeout);
+      process.stdin.removeListener('readable', onReadable);
+      process.stdin.removeListener('end', onEnd);
+      process.stdin.removeListener('error', onError);
+    }
+
+    function processChunk(chunk: string): boolean {
+      hasReceivedData = true;
+      if (totalSize + chunk.length > MAX_STDIN_SIZE) {
+        const remainingSize = MAX_STDIN_SIZE - totalSize;
+        data += chunk.slice(0, remainingSize);
+        console.warn(
+          `Warning: stdin input truncated to ${MAX_STDIN_SIZE} bytes.`,
+        );
+        process.stdin.destroy();
+        return true; // Indicates truncation occurred
+      } else {
+        data += chunk;
+        totalSize += chunk.length;
+        return false;
+      }
+    }
+
+    function checkInitialState(): boolean {
       if (process.stdin.destroyed || process.stdin.readableEnded) {
         cleanup();
         resolve('');
@@ -22,18 +46,7 @@ export async function readStdin(): Promise<string> {
 
       const chunk = process.stdin.read();
       if (chunk !== null) {
-        hasReceivedData = true;
-        if (totalSize + chunk.length > MAX_STDIN_SIZE) {
-          const remainingSize = MAX_STDIN_SIZE - totalSize;
-          data += chunk.slice(0, remainingSize);
-          console.warn(
-            `Warning: stdin input truncated to ${MAX_STDIN_SIZE} bytes.`,
-          );
-          process.stdin.destroy();
-        } else {
-          data += chunk;
-          totalSize += chunk.length;
-        }
+        processChunk(chunk);
         return false;
       }
 
@@ -44,39 +57,31 @@ export async function readStdin(): Promise<string> {
       }
 
       return false;
-    };
+    }
 
     if (checkInitialState()) {
       return;
     }
 
-    const onReadable = () => {
+    function onReadable() {
       let chunk;
       while ((chunk = process.stdin.read()) !== null) {
-        hasReceivedData = true;
-        if (totalSize + chunk.length > MAX_STDIN_SIZE) {
-          const remainingSize = MAX_STDIN_SIZE - totalSize;
-          data += chunk.slice(0, remainingSize);
-          console.warn(
-            `Warning: stdin input truncated to ${MAX_STDIN_SIZE} bytes.`,
-          );
-          process.stdin.destroy(); // Stop reading further
+        const truncated = processChunk(chunk);
+        if (truncated) {
           break;
         }
-        data += chunk;
-        totalSize += chunk.length;
       }
-    };
+    }
 
-    const onEnd = () => {
+    function onEnd() {
       cleanup();
       resolve(data);
-    };
+    }
 
-    const onError = (err: Error) => {
+    function onError(err: Error) {
       cleanup();
       reject(err);
-    };
+    }
 
     const timeout = setTimeout(() => {
       if (!hasReceivedData) {
@@ -84,13 +89,6 @@ export async function readStdin(): Promise<string> {
         resolve('');
       }
     }, 50);
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      process.stdin.removeListener('readable', onReadable);
-      process.stdin.removeListener('end', onEnd);
-      process.stdin.removeListener('error', onError);
-    };
 
     process.stdin.on('readable', onReadable);
     process.stdin.on('end', onEnd);
