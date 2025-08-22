@@ -482,12 +482,6 @@ export class RipGrepTool extends BaseDeclarativeTool<
       return errors;
     }
 
-    try {
-      new RegExp(params.pattern);
-    } catch (error) {
-      return `Invalid regular expression pattern provided: ${params.pattern}. Error: ${getErrorMessage(error)}`;
-    }
-
     // Only validate path if one is provided
     if (params.path) {
       try {

@@ -141,11 +141,9 @@ describe('RipGrepTool', () => {
       );
     });
 
-    it('should return error for invalid regex pattern', () => {
+    it('should return null for what would be an invalid regex pattern', () => {
       const params: RipGrepToolParams = { pattern: '[[' };
-      expect(grepTool.validateToolParams(params)).toContain(
-        'Invalid regular expression pattern',
-      );
+      expect(grepTool.validateToolParams(params)).toBeNull();
     });
 
     it('should return error if path does not exist', () => {
@@ -308,6 +306,22 @@ describe('RipGrepTool', () => {
         'No matches found for pattern "nonexistentpattern" in the workspace directory.',
       );
       expect(result.returnDisplay).toBe('No matches found');
+    });
+
+    it('should return an error from ripgrep for invalid regex pattern', async () => {
+      mockSpawn.mockImplementationOnce(
+        createMockSpawn({
+          exitCode: 2,
+        }),
+      );
+
+      const params: RipGrepToolParams = { pattern: '[[' };
+      const invocation = grepTool.build(params);
+      const result = await invocation.execute(abortSignal);
+      expect(result.llmContent).toContain('ripgrep exited with code 2');
+      expect(result.returnDisplay).toContain(
+        'Error: ripgrep exited with code 2',
+      );
     });
 
     it('should handle regex special characters correctly', async () => {
