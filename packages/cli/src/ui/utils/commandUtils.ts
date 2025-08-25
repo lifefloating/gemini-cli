@@ -30,12 +30,12 @@ export const isSlashCommand = (query: string): boolean => {
     return false;
   }
 
-  // Exclude JavaScript/C++ style comments that start with '//'
+  // Exclude line comments that start with '//'
   if (query.startsWith('//')) {
     return false;
   }
 
-  // Exclude C-style block comments that start with '/*'
+  // Exclude block comments that start with '/*'
   if (query.startsWith('/*')) {
     return false;
   }

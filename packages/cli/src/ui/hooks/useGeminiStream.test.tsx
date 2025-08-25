@@ -1097,25 +1097,25 @@ describe('useGeminiStream', () => {
       });
     });
 
-    it('should not call handleSlashCommand for JavaScript comments', async () => {
+    it('should not call handleSlashCommand for line comments', async () => {
       const { result, mockSendMessageStream: localMockSendMessageStream } =
         renderTestHook();
 
       await act(async () => {
-        await result.current.submitQuery('// This is a JavaScript comment');
+        await result.current.submitQuery('// This is a line comment');
       });
 
       await waitFor(() => {
         expect(mockHandleSlashCommand).not.toHaveBeenCalled();
         expect(localMockSendMessageStream).toHaveBeenCalledWith(
-          '// This is a JavaScript comment',
+          '// This is a line comment',
           expect.any(AbortSignal),
           expect.any(String),
         );
       });
     });
 
-    it('should not call handleSlashCommand for C-style comments', async () => {
+    it('should not call handleSlashCommand for block comments', async () => {
       const { result, mockSendMessageStream: localMockSendMessageStream } =
         renderTestHook();
 

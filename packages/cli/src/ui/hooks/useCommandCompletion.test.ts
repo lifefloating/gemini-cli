@@ -519,15 +519,13 @@ describe('useCommandCompletion', () => {
   });
 
   describe('prompt completion filtering', () => {
-    it('should not trigger prompt completion for JavaScript comments', async () => {
+    it('should not trigger prompt completion for line comments', async () => {
       const mockConfig = {
         getEnablePromptCompletion: () => true,
       } as Config;
 
       const { result } = renderHook(() => {
-        const textBuffer = useTextBufferForTest(
-          '// This is a JavaScript comment',
-        );
+        const textBuffer = useTextBufferForTest('// This is a line comment');
         const completion = useCommandCompletion(
           textBuffer,
           testDirs,
@@ -544,7 +542,7 @@ describe('useCommandCompletion', () => {
       expect(result.current.suggestions.length).toBe(0);
     });
 
-    it('should not trigger prompt completion for C-style comments', async () => {
+    it('should not trigger prompt completion for block comments', async () => {
       const mockConfig = {
         getEnablePromptCompletion: () => true,
       } as Config;

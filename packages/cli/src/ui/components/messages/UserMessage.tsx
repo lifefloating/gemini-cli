@@ -8,7 +8,7 @@ import React from 'react';
 import { Text, Box } from 'ink';
 import { Colors } from '../../colors.js';
 import { SCREEN_READER_USER_PREFIX } from '../../constants.js';
-import { isSlashCommand } from '../../utils/commandUtils.js';
+import { isSlashCommand as checkIsSlashCommand } from '../../utils/commandUtils.js';
 
 interface UserMessageProps {
   text: string;
@@ -17,10 +17,10 @@ interface UserMessageProps {
 export const UserMessage: React.FC<UserMessageProps> = ({ text }) => {
   const prefix = '> ';
   const prefixWidth = prefix.length;
-  const isCommand = isSlashCommand(text);
+  const isSlashCommand = checkIsSlashCommand(text);
 
-  const textColor = isCommand ? Colors.AccentPurple : Colors.Gray;
-  const borderColor = isCommand ? Colors.AccentPurple : Colors.Gray;
+  const textColor = isSlashCommand ? Colors.AccentPurple : Colors.Gray;
+  const borderColor = isSlashCommand ? Colors.AccentPurple : Colors.Gray;
 
   return (
     <Box

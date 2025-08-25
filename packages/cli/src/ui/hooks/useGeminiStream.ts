@@ -244,7 +244,7 @@ export const useGeminiStream = (
         onDebugMessage(`User query: '${trimmedQuery}'`);
         await logger?.logMessage(MessageSenderType.USER, trimmedQuery);
 
-        // Handle UI-only commands first (only if it's actually a slash command)
+        // Handle UI-only commands first
         const slashCommandResult = isSlashCommand(trimmedQuery)
           ? await handleSlashCommand(trimmedQuery)
           : false;

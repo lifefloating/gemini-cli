@@ -102,7 +102,7 @@ describe('commandUtils', () => {
       expect(isSlashCommand(' /help')).toBe(false);
     });
 
-    it('should return false for JavaScript comments starting with //', () => {
+    it('should return false for line comments starting with //', () => {
       expect(isSlashCommand('// This is a comment')).toBe(false);
       expect(isSlashCommand('// check if variants base info all filled.')).toBe(
         false,
@@ -110,7 +110,7 @@ describe('commandUtils', () => {
       expect(isSlashCommand('//comment without space')).toBe(false);
     });
 
-    it('should return false for C-style comments starting with /*', () => {
+    it('should return false for block comments starting with /*', () => {
       expect(isSlashCommand('/* This is a block comment */')).toBe(false);
       expect(isSlashCommand('/*\n * Multi-line comment\n */')).toBe(false);
       expect(isSlashCommand('/*comment without space*/')).toBe(false);
