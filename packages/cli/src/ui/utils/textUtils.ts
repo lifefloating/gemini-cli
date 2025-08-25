@@ -6,6 +6,7 @@
 
 import stripAnsi from 'strip-ansi';
 import { stripVTControlCharacters } from 'util';
+import stringWidth from 'string-width';
 
 /**
  * Calculates the maximum width of a multi-line ASCII art string.
@@ -86,3 +87,35 @@ export function stripUnsafeCharacters(str: string): string {
     })
     .join('');
 }
+
+// String width caching for performance optimization
+const stringWidthCache = new Map<string, number>();
+
+/**
+ * Cached version of stringWidth function for better performance
+ * Uses LRU-like cache with size limit to prevent memory bloat
+ */
+export const getCachedStringWidth = (str: string): number => {
+  if (stringWidthCache.has(str)) {
+    return stringWidthCache.get(str)!;
+  }
+
+  const width = stringWidth(str);
+  stringWidthCache.set(str, width);
+
+  if (stringWidthCache.size > 10000) {
+    const firstKey = stringWidthCache.keys().next().value;
+    if (firstKey !== undefined) {
+      stringWidthCache.delete(firstKey);
+    }
+  }
+
+  return width;
+};
+
+/**
+ * Clear the string width cache
+ */
+export const clearStringWidthCache = (): void => {
+  stringWidthCache.clear();
+};
