@@ -1044,6 +1044,9 @@ export function textBufferReducer(
 
       const insertParts = str.split('\n');
 
+      // Check if we should skip layout update
+      const shouldSkipLayout = action.skipLayoutUpdate === true;
+
       if (insertParts.length === 1) {
         // Single line insertion
         newLines[nextState.cursorRow] = before + insertParts[0] + after;
@@ -1052,7 +1055,10 @@ export function textBufferReducer(
           lines: newLines,
           cursorCol: cpLen(before) + cpLen(insertParts[0]),
           preferredCol: null,
-          layoutVersion: nextState.layoutVersion + 1,
+          layoutVersion: shouldSkipLayout
+            ? nextState.layoutVersion
+            : nextState.layoutVersion + 1,
+          skipLayoutUpdate: shouldSkipLayout,
         };
       } else {
         // Multi-line insertion
@@ -1074,7 +1080,10 @@ export function textBufferReducer(
           cursorRow: nextState.cursorRow + insertParts.length - 1,
           cursorCol: cpLen(insertParts[insertParts.length - 1]),
           preferredCol: null,
-          layoutVersion: nextState.layoutVersion + 1,
+          layoutVersion: shouldSkipLayout
+            ? nextState.layoutVersion
+            : nextState.layoutVersion + 1,
+          skipLayoutUpdate: shouldSkipLayout,
         };
       }
     }
@@ -1588,6 +1597,19 @@ export function useTextBuffer({
 
   const text = useMemo(() => lines.join('\n'), [lines]);
 
+  useEffect(() => {
+    if (state.skipLayoutUpdate) {
+      const timer = setTimeout(() => {
+        dispatch({
+          type: 'set_layout_update_mode',
+          payload: { enabled: true },
+        });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [state.skipLayoutUpdate]);
+
   const visualLayout = useMemo(() => {
     // Skip layout calculation during batch operations for performance
     if (state.skipLayoutUpdate) {
@@ -1647,10 +1669,14 @@ export function useTextBuffer({
         return;
       }
 
-      // Use batch insert for large paste operations to improve performance
-      if (paste && ch.length > 100) {
+      // Batch insert for large text (paste or >1000 chars)
+      if (paste || ch.length > 1000) {
         const minLengthToInferAsDragDrop = 3;
-        if (ch.length >= minLengthToInferAsDragDrop && !shellModeActive) {
+        if (
+          ch.length >= minLengthToInferAsDragDrop &&
+          !shellModeActive &&
+          paste
+        ) {
           let potentialPath = ch.trim();
           const quoteMatch = potentialPath.match(/^'(.*)'$/);
           if (quoteMatch) {
@@ -1667,6 +1693,7 @@ export function useTextBuffer({
           type: 'batch_insert',
           payload: ch,
           skipUndo: false,
+          skipLayoutUpdate: true,
         });
         return;
       }

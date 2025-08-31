@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import type { Mock } from 'vitest';
 import { vi } from 'vitest';
 import type { Key } from './KeypressContext.js';
@@ -69,11 +69,16 @@ describe('KeypressContext - Kitty Protocol', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     stdin = new MockStdin();
     (useStdin as Mock).mockReturnValue({
       stdin,
       setRawMode: mockSetRawMode,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('Enter key handling', () => {
@@ -93,6 +98,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[13u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -121,6 +128,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[57414u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -149,6 +158,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[57414;2u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -177,6 +188,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[57414;5u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -205,6 +218,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[57414;3u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -262,6 +277,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence('\x1b[27u');
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -281,6 +298,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[9u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -300,6 +319,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[9;2u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -318,6 +339,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[127u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -337,6 +360,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence(`\x1b[127;3u`);
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -366,10 +391,8 @@ describe('KeypressContext - Kitty Protocol', () => {
         stdin.sendPaste(pastedText);
       });
 
-      await waitFor(() => {
-        // Expect the handler to be called exactly once for the entire paste
-        expect(keyHandler).toHaveBeenCalledTimes(1);
-      });
+      // Expect the handler to be called exactly once for the entire paste
+      expect(keyHandler).toHaveBeenCalledTimes(1);
 
       // Verify the single event contains the full pasted text
       expect(keyHandler).toHaveBeenCalledWith(
@@ -417,6 +440,8 @@ describe('KeypressContext - Kitty Protocol', () => {
       act(() => {
         stdin.sendKittySequence('\x1b[27u');
       });
+      // Advance timers to process batched events
+      act(() => vi.runAllTimers());
 
       expect(keyHandler).toHaveBeenCalled();
       expect(consoleLogSpy).not.toHaveBeenCalledWith(
