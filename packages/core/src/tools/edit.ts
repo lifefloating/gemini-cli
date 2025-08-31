@@ -4,28 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as Diff from 'diff';
-import {
-  BaseDeclarativeTool,
-  Kind,
+import type {
   ToolCallConfirmationDetails,
-  ToolConfirmationOutcome,
   ToolEditConfirmationDetails,
   ToolInvocation,
   ToolLocation,
   ToolResult,
   ToolResultDisplay,
 } from './tools.js';
+import { BaseDeclarativeTool, Kind, ToolConfirmationOutcome } from './tools.js';
 import { ToolErrorType } from './tool-error.js';
 import { makeRelative, shortenPath } from '../utils/paths.js';
 import { isNodeError } from '../utils/errors.js';
-import { Config, ApprovalMode } from '../config/config.js';
+import type { Config } from '../config/config.js';
+import { ApprovalMode } from '../config/config.js';
 import { ensureCorrectEdit } from '../utils/editCorrector.js';
 import { DEFAULT_DIFF_OPTIONS, getDiffStat } from './diffOptions.js';
 import { ReadFileTool } from './read-file.js';
-import { ModifiableDeclarativeTool, ModifyContext } from './modifiable-tool.js';
+import type {
+  ModifiableDeclarativeTool,
+  ModifyContext,
+} from './modifiable-tool.js';
 import { IDEConnectionStatus } from '../ide/ide-client.js';
 import { FileOperation } from '../telemetry/metrics.js';
 import { logFileOperation } from '../telemetry/loggers.js';
@@ -84,9 +86,9 @@ export interface EditToolParams {
   modified_by_user?: boolean;
 
   /**
-   * Initially proposed string.
+   * Initially proposed content.
    */
-  ai_proposed_string?: string;
+  ai_proposed_content?: string;
 }
 
 interface CalculatedEdit {
@@ -363,12 +365,12 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       let displayResult: ToolResultDisplay;
       const fileName = path.basename(this.params.file_path);
       const originallyProposedContent =
-        this.params.ai_proposed_string || this.params.new_string;
+        this.params.ai_proposed_content || editData.newContent;
       const diffStat = getDiffStat(
         fileName,
         editData.currentContent ?? '',
         originallyProposedContent,
-        this.params.new_string,
+        editData.newContent,
       );
 
       if (editData.isNewFile) {
@@ -570,16 +572,13 @@ Expectation for required parameters:
         oldContent: string,
         modifiedProposedContent: string,
         originalParams: EditToolParams,
-      ): EditToolParams => {
-        const content = originalParams.new_string;
-        return {
-          ...originalParams,
-          ai_proposed_string: content,
-          old_string: oldContent,
-          new_string: modifiedProposedContent,
-          modified_by_user: true,
-        };
-      },
+      ): EditToolParams => ({
+        ...originalParams,
+        ai_proposed_content: oldContent,
+        old_string: oldContent,
+        new_string: modifiedProposedContent,
+        modified_by_user: true,
+      }),
     };
   }
 }
