@@ -1031,9 +1031,7 @@ export function textBufferReducer(
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n');
 
-      // For very large text, skip unsafe character stripping to improve performance
-      const str =
-        rawText.length > 5000 ? rawText : stripUnsafeCharacters(rawText);
+      const str = stripUnsafeCharacters(rawText);
 
       if (!str) return nextState;
 

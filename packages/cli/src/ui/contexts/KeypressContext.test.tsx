@@ -402,6 +402,92 @@ describe('KeypressContext - Kitty Protocol', () => {
         }),
       );
     });
+
+    it('should detect rapid input as paste and include all previous input', async () => {
+      const keyHandler = vi.fn();
+      const { result } = renderHook(() => useKeypressContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.subscribe(keyHandler);
+      });
+
+      act(() => {
+        for (let i = 0; i < 21; i++) {
+          stdin.pressKey({
+            name: 'a',
+            ctrl: false,
+            meta: false,
+            shift: false,
+            sequence: 'a',
+            paste: false,
+          });
+          if (i < 20) {
+            vi.advanceTimersByTime(5);
+          }
+        }
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+
+      const pasteCall = keyHandler.mock.calls.find(
+        (call) => call[0].paste === true,
+      );
+      expect(pasteCall).toBeDefined();
+      expect(pasteCall![0].sequence).toBe('a'.repeat(20));
+    });
+
+    it('should reset rapid input buffer when input is not rapid', async () => {
+      const keyHandler = vi.fn();
+      const { result } = renderHook(() => useKeypressContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.subscribe(keyHandler);
+      });
+
+      act(() => {
+        stdin.pressKey({
+          name: 'a',
+          ctrl: false,
+          meta: false,
+          shift: false,
+          sequence: 'a',
+          paste: false,
+        });
+        stdin.pressKey({
+          name: 'b',
+          ctrl: false,
+          meta: false,
+          shift: false,
+          sequence: 'b',
+          paste: false,
+        });
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+
+      act(() => {
+        stdin.pressKey({
+          name: 'c',
+          ctrl: false,
+          meta: false,
+          shift: false,
+          sequence: 'c',
+          paste: false,
+        });
+      });
+      const pasteCall = keyHandler.mock.calls.find(
+        (call) => call[0].paste === true,
+      );
+      expect(pasteCall).toBeUndefined();
+    });
   });
 
   describe('debug keystroke logging', () => {

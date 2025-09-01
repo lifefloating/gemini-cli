@@ -128,6 +128,7 @@ export function KeypressProvider({
     let lastInputTime = 0;
     let rapidInputCount = 0;
     let smartPasteTimeout: NodeJS.Timeout | null = null;
+    let rapidInputBuffer: string[] = [];
     const RAPID_INPUT_THRESHOLD = 10;
     const RAPID_INPUT_COUNT_TRIGGER = 20;
 
@@ -237,14 +238,15 @@ export function KeypressProvider({
       if (!isPaste && !key.ctrl && key.sequence && key.sequence.length > 0) {
         if (now - lastInputTime < RAPID_INPUT_THRESHOLD) {
           rapidInputCount++;
+          rapidInputBuffer.push(key.sequence);
           if (rapidInputCount >= RAPID_INPUT_COUNT_TRIGGER) {
             // Detected rapid input, likely a paste without bracketed paste mode
             isPaste = true;
             if (rl) {
               rl.pause();
             }
-            // Start accumulating in paste buffer
-            pasteBuffer = Buffer.from(key.sequence);
+            pasteBuffer = Buffer.from(rapidInputBuffer.join(''));
+            rapidInputBuffer = [];
             // Clear any existing timeout
             if (smartPasteTimeout) {
               clearTimeout(smartPasteTimeout);
@@ -270,18 +272,20 @@ export function KeypressProvider({
                 }
               }
               smartPasteTimeout = null;
-            }, 100); // Auto-end after 100ms of no input
+            }, 100);
             return;
           }
         } else {
           rapidInputCount = 0;
+          rapidInputBuffer = [];
         }
         lastInputTime = now;
       }
 
       if (key.name === 'paste-start') {
         isPaste = true;
-        rapidInputCount = 0; // Reset rapid input counter
+        rapidInputCount = 0;
+        rapidInputBuffer = [];
         // Pause readline during paste to prevent event storm
         if (rl) {
           rl.pause();
@@ -290,7 +294,8 @@ export function KeypressProvider({
       }
       if (key.name === 'paste-end') {
         isPaste = false;
-        rapidInputCount = 0; // Reset rapid input counter
+        rapidInputCount = 0;
+        rapidInputBuffer = [];
         broadcast(
           {
             name: '',
