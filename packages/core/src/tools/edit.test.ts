@@ -197,6 +197,14 @@ describe('EditTool', () => {
       const result = applyReplacement(current, oldStr, newStr, false);
       expect(result).toBe("price is $200 and pattern end is ' '");
     });
+
+    it("should treat $' literally and not as a replacement pattern", () => {
+      const current = 'foo';
+      const oldStr = 'foo';
+      const newStr = "bar$'baz";
+      const result = applyReplacement(current, oldStr, newStr, false);
+      expect(result).toBe("bar$'baz");
+    });
   });
 
   describe('validateToolParams', () => {

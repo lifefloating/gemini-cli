@@ -36,11 +36,11 @@ import {
   type Mock,
 } from 'vitest';
 import {
-  applyReplacement,
   SmartEditTool,
   type EditToolParams,
   calculateReplacement,
 } from './smart-edit.js';
+import { applyReplacement } from './edit.js';
 import { type FileDiff, ToolConfirmationOutcome } from './tools.js';
 import { ToolErrorType } from './tool-error.js';
 import path from 'node:path';
@@ -167,6 +167,14 @@ describe('SmartEditTool', () => {
       const newStr = 'regex end is $ and correct';
       const result = applyReplacement(current, oldStr, newStr, false);
       expect(result).toBe('regex end is $ and correct and more');
+    });
+
+    it("should treat $' literally and not as a replacement pattern", () => {
+      const current = 'foo';
+      const oldStr = 'foo';
+      const newStr = "bar$'baz";
+      const result = applyReplacement(current, oldStr, newStr, false);
+      expect(result).toBe("bar$'baz");
     });
   });
 
