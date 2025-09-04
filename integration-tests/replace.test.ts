@@ -64,7 +64,9 @@ describe('replace', () => {
 
   it('should handle $ literally when replacing text ending with $', async () => {
     const rig = new TestRig();
-    await rig.setup('should handle $ literally when replacing text ending with $');
+    await rig.setup(
+      'should handle $ literally when replacing text ending with $',
+    );
 
     const fileName = 'regex.yml';
     const originalContent = "| select('match', '^[sv]d[a-z]$')\n";

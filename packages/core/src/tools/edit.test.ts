@@ -190,10 +190,10 @@ describe('EditTool', () => {
       );
     });
 
-    it("should treat $ literally and not as replacement pattern", () => {
+    it('should treat $ literally and not as replacement pattern', () => {
       const current = "price is $100 and pattern end is ' '";
-      const oldStr = "price is $100";
-      const newStr = "price is $200";
+      const oldStr = 'price is $100';
+      const newStr = 'price is $200';
       const result = applyReplacement(current, oldStr, newStr, false);
       expect(result).toBe("price is $200 and pattern end is ' '");
     });
