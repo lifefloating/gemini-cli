@@ -160,6 +160,14 @@ describe('SmartEditTool', () => {
         'hello new world new',
       );
     });
+
+    it("should treat $ literally and not as replacement pattern", () => {
+      const current = "regex end is $ and more";
+      const oldStr = "regex end is $";
+      const newStr = "regex end is $ and correct";
+      const result = applyReplacement(current, oldStr, newStr, false);
+      expect(result).toBe("regex end is $ and correct and more");
+    });
   });
 
   describe('calculateReplacement', () => {
