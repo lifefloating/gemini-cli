@@ -570,6 +570,26 @@ describe('useTextBuffer', () => {
       act(() => result.current.insert(shortText, { paste: true }));
       expect(getBufferState(result).text).toBe(shortText);
     });
+
+    it('should handle file paths with backslashes', () => {
+      const { result } = renderHook(() =>
+        useTextBuffer({ viewport, isValidPath: () => true }),
+      );
+      const backslashPath = '/path/to/\\backslash-file.txt';
+      act(() => result.current.insert(backslashPath, { paste: true }));
+      expect(getBufferState(result).text).toBe(`@${backslashPath} `);
+    });
+
+    it('should fix shell-escaped backslashes in dragged paths', () => {
+      const { result } = renderHook(() =>
+        useTextBuffer({ viewport, isValidPath: () => true }),
+      );
+      const escapedPath = '/path/to/\\\\backslash-file.txt';
+      act(() => result.current.insert(escapedPath, { paste: true }));
+      expect(getBufferState(result).text).toBe(
+        '@/path/to/\\backslash-file.txt ',
+      );
+    });
   });
 
   describe('Shell Mode Behavior', () => {

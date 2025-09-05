@@ -1531,9 +1531,11 @@ export function useTextBuffer({
           potentialPath = quoteMatch[1];
         }
 
-        potentialPath = potentialPath.trim();
-        if (isValidPath(unescapePath(potentialPath))) {
-          ch = `@${potentialPath} `;
+        // Fix shell-escaped backslashes
+        const fixedPath = potentialPath.trim().replace(/\\\\/g, '\\');
+
+        if (isValidPath(unescapePath(fixedPath))) {
+          ch = `@${fixedPath} `;
         }
       }
 

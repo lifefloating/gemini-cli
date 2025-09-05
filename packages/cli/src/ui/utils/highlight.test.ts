@@ -101,4 +101,54 @@ describe('parseInputForHighlighting', () => {
       { text: ' now', type: 'default' },
     ]);
   });
+
+  it('should handle file paths with backslashes', () => {
+    const text = 'Check @/Users/test/\\backslash-file-test.txt for details';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: 'Check ', type: 'default' },
+      { text: '@/Users/test/\\backslash-file-test.txt', type: 'file' },
+      { text: ' for details', type: 'default' },
+    ]);
+  });
+
+  it('should handle file paths with multiple backslashes', () => {
+    const text = 'Check @/Users/test/\\\\backslash-file-test.txt';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: 'Check ', type: 'default' },
+      { text: '@/Users/test/\\\\backslash-file-test.txt', type: 'file' },
+    ]);
+  });
+
+  it('should handle file paths starting with backslash', () => {
+    const text = '@\\new-backslash-test.txt for testing';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: '@\\new-backslash-test.txt', type: 'file' },
+      { text: ' for testing', type: 'default' },
+    ]);
+  });
+
+  it('should handle file paths with full path containing backslashes', () => {
+    const text = '@/Users/test/\\new-backslash-test.txt and more text';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: '@/Users/test/\\new-backslash-test.txt', type: 'file' },
+      { text: ' and more text', type: 'default' },
+    ]);
+  });
+
+  it('should handle complex backslash patterns', () => {
+    const text = '@\\\\\\\\backslash-file-test.txt for testing';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: '@\\\\\\\\backslash-file-test.txt', type: 'file' },
+      { text: ' for testing', type: 'default' },
+    ]);
+  });
+
+  it('should handle backslashes in middle of filename', () => {
+    const text = 'Check @bac\\k\\slash-file-test.txt here';
+    expect(parseInputForHighlighting(text)).toEqual([
+      { text: 'Check ', type: 'default' },
+      { text: '@bac\\k\\slash-file-test.txt', type: 'file' },
+      { text: ' here', type: 'default' },
+    ]);
+  });
 });
