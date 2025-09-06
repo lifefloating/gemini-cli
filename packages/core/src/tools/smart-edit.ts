@@ -70,8 +70,7 @@ async function calculateExactReplacement(
 
   const exactOccurrences = normalizedCode.split(normalizedSearch).length - 1;
   if (exactOccurrences > 0) {
-    let modifiedCode = normalizedCode.replaceAll(
-      normalizedSearch,
+    let modifiedCode = normalizedCode.split(normalizedSearch).join(
       normalizedReplace,
     );
     modifiedCode = restoreTrailingNewline(currentContent, modifiedCode);
