@@ -734,7 +734,7 @@ export function saveSettings(
       ) as Settings;
     }
 
-    // Use the new format-preserving update function
+    // Use the format-preserving update function to prevent env var leakage and maintain comments
     updateSettingsFilePreservingFormat(
       settingsFile.path,
       settingsToSave as Record<string, unknown>,

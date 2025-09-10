@@ -32,8 +32,10 @@ export function updateSettingsFilePreservingFormat(
   try {
     parsed = parse(originalContent) as Record<string, unknown>;
   } catch (error) {
-    console.error('Invalid JSON in settings file, recreating:', error);
-    fs.writeFileSync(filePath, JSON.stringify(updates, null, 2), 'utf-8');
+    console.error('Error parsing settings file:', error);
+    console.error(
+      'Settings file may be corrupted. Please check the JSON syntax.',
+    );
     return;
   }
 
