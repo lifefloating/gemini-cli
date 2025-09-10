@@ -235,6 +235,37 @@ describe('commentJson', () => {
 
       consoleSpy.mockRestore();
     });
+
+    it('should prevent prototype pollution attacks', () => {
+      const originalContent = `{
+        "existingField": "value"
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      const maliciousUpdate = {
+        existingField: 'updated',
+        __proto__: { polluted: 'malicious' },
+        constructor: { prototype: { polluted: 'malicious' } },
+        prototype: { polluted: 'malicious' },
+      };
+
+      const originalKeys = Object.keys(Object.prototype).length;
+      const hadPolluted = 'polluted' in Object.prototype;
+
+      updateSettingsFilePreservingFormat(testFilePath, maliciousUpdate);
+
+      expect('polluted' in Object.prototype).toBe(hadPolluted);
+      expect(Object.keys(Object.prototype).length).toBe(originalKeys);
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('"existingField": "updated"');
+      expect(updatedContent).not.toContain('__proto__');
+      expect(updatedContent).not.toContain('polluted');
+
+      const testObj = {};
+      expect(testObj).not.toHaveProperty('polluted');
+    });
   });
 
   describe('trackEnvVarMappings', () => {

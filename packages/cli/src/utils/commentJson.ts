@@ -56,6 +56,10 @@ function applyUpdates(
   const result = current;
 
   for (const [key, value] of Object.entries(updates)) {
+    // Prevent prototype pollution
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
     if (
       typeof value === 'object' &&
       value !== null &&
