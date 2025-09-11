@@ -724,7 +724,6 @@ export function saveSettings(settingsFile: SettingsFile): void {
     updateSettingsFilePreservingFormat(
       settingsFile.path,
       settingsToSave as Record<string, unknown>,
-      [],
     );
   } catch (error) {
     console.error('Error saving user settings file:', error);

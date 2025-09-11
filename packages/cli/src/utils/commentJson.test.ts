@@ -8,10 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import {
-  updateSettingsFilePreservingFormat,
-  trackEnvVarMappings,
-} from './commentJson.js';
+import { updateSettingsFilePreservingFormat } from './commentJson.js';
 
 describe('commentJson', () => {
   let tempDir: string;
@@ -53,46 +50,6 @@ describe('commentJson', () => {
       expect(updatedContent).toContain('// Theme setting');
       expect(updatedContent).toContain('"model": "gemini-3.0-ultra"');
       expect(updatedContent).toContain('"theme": "dark"');
-    });
-
-    it('should preserve environment variable references', () => {
-      const originalContent = `{
-        "mcpServers": {
-          "context7": {
-            "headers": {
-              "API_KEY": "$API_KEY"
-            }
-          }
-        }
-      }`;
-
-      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
-
-      const envVarMappings = [
-        {
-          path: ['mcpServers', 'context7', 'headers', 'API_KEY'],
-          originalValue: '$API_KEY',
-          resolvedValue: 'actual-key-value',
-        },
-      ];
-
-      updateSettingsFilePreservingFormat(
-        testFilePath,
-        {
-          mcpServers: {
-            context7: {
-              headers: {
-                API_KEY: 'actual-key-value',
-              },
-            },
-          },
-        },
-        envVarMappings,
-      );
-
-      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
-      expect(updatedContent).toContain('"API_KEY": "$API_KEY"');
-      expect(updatedContent).not.toContain('actual-key-value');
     });
 
     it('should handle nested object updates', () => {
@@ -153,7 +110,7 @@ describe('commentJson', () => {
           // Active server
           "context7": {
             "headers": {
-              "API_KEY": "$API_KEY" // Environment variable
+              "API_KEY": "test-key" // API key
             }
           }
         }
@@ -161,45 +118,31 @@ describe('commentJson', () => {
 
       fs.writeFileSync(testFilePath, complexContent, 'utf-8');
 
-      const envVarMappings = [
-        {
-          path: ['mcpServers', 'context7', 'headers', 'API_KEY'],
-          originalValue: '$API_KEY',
-          resolvedValue: 'resolved-key',
-        },
-      ];
-
-      updateSettingsFilePreservingFormat(
-        testFilePath,
-        {
-          model: 'gemini-3.0-ultra',
-          mcpServers: {
-            context7: {
-              headers: {
-                API_KEY: 'resolved-key',
-              },
+      updateSettingsFilePreservingFormat(testFilePath, {
+        model: 'gemini-3.0-ultra',
+        mcpServers: {
+          context7: {
+            headers: {
+              API_KEY: 'new-test-key',
             },
           },
-          newSection: {
-            setting: 'value',
-          },
         },
-        envVarMappings,
-      );
+        newSection: {
+          setting: 'value',
+        },
+      });
 
       const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
 
       // Verify comments preserved
       expect(updatedContent).toContain('// Settings');
       expect(updatedContent).toContain('// Active server');
-      expect(updatedContent).toContain('// Environment variable');
+      expect(updatedContent).toContain('// API key');
 
       // Verify updates applied
       expect(updatedContent).toContain('"model": "gemini-3.0-ultra"');
       expect(updatedContent).toContain('"newSection"');
-
-      // Verify env vars restored
-      expect(updatedContent).toContain('"API_KEY": "$API_KEY"');
+      expect(updatedContent).toContain('"API_KEY": "new-test-key"');
     });
 
     it('should handle corrupted JSON files gracefully', () => {
@@ -234,73 +177,6 @@ describe('commentJson', () => {
       expect(unchangedContent).toBe(corruptedContent);
 
       consoleSpy.mockRestore();
-    });
-  });
-
-  describe('trackEnvVarMappings', () => {
-    it('should track environment variable mappings', () => {
-      const original = {
-        server: {
-          apiKey: '$API_KEY',
-          normalValue: 'text',
-        },
-      };
-
-      const resolved = {
-        server: {
-          apiKey: 'actual-key',
-          normalValue: 'text',
-        },
-      };
-
-      const mappings = trackEnvVarMappings(resolved, original);
-
-      expect(mappings).toHaveLength(1);
-      expect(mappings[0]).toEqual({
-        path: ['server', 'apiKey'],
-        originalValue: '$API_KEY',
-        resolvedValue: 'actual-key',
-      });
-    });
-
-    it('should not track non-environment variable values', () => {
-      const original = {
-        normalValue: 'text',
-      };
-
-      const resolved = {
-        normalValue: 'text',
-      };
-
-      const mappings = trackEnvVarMappings(resolved, original);
-      expect(mappings).toHaveLength(0);
-    });
-
-    it('should handle nested objects', () => {
-      const original = {
-        level1: {
-          level2: {
-            envVar: '$NESTED_VAR',
-          },
-        },
-      };
-
-      const resolved = {
-        level1: {
-          level2: {
-            envVar: 'nested-value',
-          },
-        },
-      };
-
-      const mappings = trackEnvVarMappings(resolved, original);
-
-      expect(mappings).toHaveLength(1);
-      expect(mappings[0]).toEqual({
-        path: ['level1', 'level2', 'envVar'],
-        originalValue: '$NESTED_VAR',
-        resolvedValue: 'nested-value',
-      });
     });
   });
 });
