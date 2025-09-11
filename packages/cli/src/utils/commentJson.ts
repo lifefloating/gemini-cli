@@ -55,11 +55,8 @@ function applyUpdates(
 ): Record<string, unknown> {
   const result = current;
 
-  for (const [key, value] of Object.entries(updates)) {
-    // Prevent prototype pollution
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
-      continue;
-    }
+  for (const key of Object.getOwnPropertyNames(updates)) {
+    const value = updates[key];
     if (
       typeof value === 'object' &&
       value !== null &&
@@ -107,7 +104,26 @@ function restoreEnvVarsRecursive(
     return;
   }
 
-  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      const value = obj[i];
+      const fullPath = [...currentPath, i.toString()];
+      const pathStr = fullPath.join('.');
+
+      const envVarReference = envVarMap.get(pathStr);
+      if (envVarReference && typeof value === 'string') {
+        obj[i] = envVarReference;
+      } else if (typeof value === 'object' && value !== null) {
+        restoreEnvVarsRecursive(value, fullPath, envVarMap);
+      }
+    }
+    return;
+  }
+
+  for (const key of Object.getOwnPropertyNames(
+    obj as Record<string, unknown>,
+  )) {
+    const value = (obj as Record<string, unknown>)[key];
     const fullPath = [...currentPath, key];
     const pathStr = fullPath.join('.');
 
@@ -119,6 +135,8 @@ function restoreEnvVarsRecursive(
       value !== null &&
       !Array.isArray(value)
     ) {
+      restoreEnvVarsRecursive(value, fullPath, envVarMap);
+    } else if (Array.isArray(value)) {
       restoreEnvVarsRecursive(value, fullPath, envVarMap);
     }
   }
@@ -143,7 +161,38 @@ export function trackEnvVarMappings(
     return mappings;
   }
 
-  for (const key in obj as Record<string, unknown>) {
+  if (Array.isArray(obj) && Array.isArray(originalObj)) {
+    for (let i = 0; i < Math.max(obj.length, originalObj.length); i++) {
+      const value = obj[i];
+      const originalValue = originalObj[i];
+      const currentPath = [...path, i.toString()];
+
+      if (typeof originalValue === 'string' && typeof value === 'string') {
+        const envVarPattern = /^\$(?:(\w+)|{([^}]+)})$/;
+        const match = originalValue.match(envVarPattern);
+
+        if (match && value !== originalValue) {
+          mappings.push({
+            path: currentPath,
+            originalValue,
+            resolvedValue: value,
+          });
+        }
+      } else if (typeof value === 'object' && value !== null) {
+        const nestedMappings = trackEnvVarMappings(
+          value,
+          originalValue,
+          currentPath,
+        );
+        mappings.push(...nestedMappings);
+      }
+    }
+    return mappings;
+  }
+
+  for (const key of Object.getOwnPropertyNames(
+    obj as Record<string, unknown>,
+  )) {
     const value = (obj as Record<string, unknown>)[key];
     const originalValue = (originalObj as Record<string, unknown>)[key];
     const currentPath = [...path, key];

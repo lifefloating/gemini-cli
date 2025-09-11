@@ -29,10 +29,7 @@ import {
 } from './settingsSchema.js';
 import { resolveEnvVarsInObject } from '../utils/envVarResolver.js';
 import { customDeepMerge } from '../utils/deepMerge.js';
-import {
-  updateSettingsFilePreservingFormat,
-  trackEnvVarMappings,
-} from '../utils/commentJson.js';
+import { updateSettingsFilePreservingFormat } from '../utils/commentJson.js';
 
 function getMergeStrategyForPath(path: string[]): MergeStrategy | undefined {
   let current: SettingDefinition | undefined = undefined;
@@ -174,7 +171,9 @@ export interface SettingsError {
 
 export interface SettingsFile {
   settings: Settings;
+  originalSettings: Settings;
   path: string;
+  rawJson?: string;
 }
 
 function setNestedProperty(
@@ -357,10 +356,6 @@ export class LoadedSettings {
     workspace: SettingsFile,
     isTrusted: boolean,
     migratedInMemorScopes: Set<SettingScope>,
-    envVarMappings: Map<
-      SettingScope,
-      ReturnType<typeof trackEnvVarMappings>
-    > = new Map(),
   ) {
     this.system = system;
     this.systemDefaults = systemDefaults;
@@ -368,7 +363,6 @@ export class LoadedSettings {
     this.workspace = workspace;
     this.isTrusted = isTrusted;
     this.migratedInMemorScopes = migratedInMemorScopes;
-    this.envVarMappings = envVarMappings;
     this._merged = this.computeMergedSettings();
   }
 
@@ -378,10 +372,6 @@ export class LoadedSettings {
   readonly workspace: SettingsFile;
   readonly isTrusted: boolean;
   readonly migratedInMemorScopes: Set<SettingScope>;
-  readonly envVarMappings: Map<
-    SettingScope,
-    ReturnType<typeof trackEnvVarMappings>
-  >;
 
   private _merged: Settings;
 
@@ -417,9 +407,9 @@ export class LoadedSettings {
   setValue(scope: SettingScope, key: string, value: unknown): void {
     const settingsFile = this.forScope(scope);
     setNestedProperty(settingsFile.settings, key, value);
+    setNestedProperty(settingsFile.originalSettings, key, value);
     this._merged = this.computeMergedSettings();
-    const envMappings = this.envVarMappings.get(scope) || [];
-    saveSettings(settingsFile, envMappings);
+    saveSettings(settingsFile);
   }
 }
 
@@ -531,10 +521,6 @@ export function loadSettings(
   const systemSettingsPath = getSystemSettingsPath();
   const systemDefaultsPath = getSystemDefaultsPath();
   const migratedInMemorScopes = new Set<SettingScope>();
-  const envVarMappings = new Map<
-    SettingScope,
-    ReturnType<typeof trackEnvVarMappings>
-  >();
 
   // Resolve paths to their canonical representation to handle symlinks
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
@@ -555,7 +541,10 @@ export function loadSettings(
     workspaceDir,
   ).getWorkspaceSettingsPath();
 
-  const loadAndMigrate = (filePath: string, scope: SettingScope): Settings => {
+  const loadAndMigrate = (
+    filePath: string,
+    scope: SettingScope,
+  ): { settings: Settings; rawJson?: string } => {
     try {
       if (fs.existsSync(filePath)) {
         const content = fs.readFileSync(filePath, 'utf-8');
@@ -570,7 +559,7 @@ export function loadSettings(
             message: 'Settings file is not a valid JSON object.',
             path: filePath,
           });
-          return {};
+          return { settings: {} };
         }
 
         let settingsObject = rawSettings as Record<string, unknown>;
@@ -598,7 +587,7 @@ export function loadSettings(
             settingsObject = migratedSettings;
           }
         }
-        return settingsObject as Settings;
+        return { settings: settingsObject as Settings, rawJson: content };
       }
     } catch (error: unknown) {
       settingsErrors.push({
@@ -606,22 +595,39 @@ export function loadSettings(
         path: filePath,
       });
     }
-    return {};
+    return { settings: {} };
   };
 
-  systemSettings = loadAndMigrate(systemSettingsPath, SettingScope.System);
-  systemDefaultSettings = loadAndMigrate(
+  const systemResult = loadAndMigrate(systemSettingsPath, SettingScope.System);
+  const systemDefaultsResult = loadAndMigrate(
     systemDefaultsPath,
     SettingScope.SystemDefaults,
   );
-  userSettings = loadAndMigrate(USER_SETTINGS_PATH, SettingScope.User);
+  const userResult = loadAndMigrate(USER_SETTINGS_PATH, SettingScope.User);
 
+  let workspaceResult: { settings: Settings; rawJson?: string } = {
+    settings: {} as Settings,
+    rawJson: undefined,
+  };
   if (realWorkspaceDir !== realHomeDir) {
-    workspaceSettings = loadAndMigrate(
+    workspaceResult = loadAndMigrate(
       workspaceSettingsPath,
       SettingScope.Workspace,
     );
   }
+
+  const systemOriginalSettings = structuredClone(systemResult.settings);
+  const systemDefaultsOriginalSettings = structuredClone(
+    systemDefaultsResult.settings,
+  );
+  const userOriginalSettings = structuredClone(userResult.settings);
+  const workspaceOriginalSettings = structuredClone(workspaceResult.settings);
+
+  // Environment variables for runtime use
+  systemSettings = resolveEnvVarsInObject(systemResult.settings);
+  systemDefaultSettings = resolveEnvVarsInObject(systemDefaultsResult.settings);
+  userSettings = resolveEnvVarsInObject(userResult.settings);
+  workspaceSettings = resolveEnvVarsInObject(workspaceResult.settings);
 
   // Support legacy theme names
   if (userSettings.ui?.theme === 'VS') {
@@ -658,30 +664,6 @@ export function loadSettings(
   // the settings to avoid a cycle
   loadEnvironment(tempMergedSettings);
 
-  // Now that the environment is loaded, track and resolve variables in the settings.
-  // Track environment variable mappings before resolution
-  const systemOriginal = structuredClone(systemSettings);
-  const userOriginal = structuredClone(userSettings);
-  const workspaceOriginal = structuredClone(workspaceSettings);
-
-  systemSettings = resolveEnvVarsInObject(systemSettings);
-  userSettings = resolveEnvVarsInObject(userSettings);
-  workspaceSettings = resolveEnvVarsInObject(workspaceSettings);
-
-  // Track which values came from environment variables
-  envVarMappings.set(
-    SettingScope.System,
-    trackEnvVarMappings(systemSettings, systemOriginal),
-  );
-  envVarMappings.set(
-    SettingScope.User,
-    trackEnvVarMappings(userSettings, userOriginal),
-  );
-  envVarMappings.set(
-    SettingScope.Workspace,
-    trackEnvVarMappings(workspaceSettings, workspaceOriginal),
-  );
-
   // Create LoadedSettings first
 
   if (settingsErrors.length > 0) {
@@ -697,29 +679,33 @@ export function loadSettings(
     {
       path: systemSettingsPath,
       settings: systemSettings,
+      originalSettings: systemOriginalSettings,
+      rawJson: systemResult.rawJson,
     },
     {
       path: systemDefaultsPath,
       settings: systemDefaultSettings,
+      originalSettings: systemDefaultsOriginalSettings,
+      rawJson: systemDefaultsResult.rawJson,
     },
     {
       path: USER_SETTINGS_PATH,
       settings: userSettings,
+      originalSettings: userOriginalSettings,
+      rawJson: userResult.rawJson,
     },
     {
       path: workspaceSettingsPath,
       settings: workspaceSettings,
+      originalSettings: workspaceOriginalSettings,
+      rawJson: workspaceResult.rawJson,
     },
     isTrusted,
     migratedInMemorScopes,
-    envVarMappings,
   );
 }
 
-export function saveSettings(
-  settingsFile: SettingsFile,
-  envVarMappings: ReturnType<typeof trackEnvVarMappings> = [],
-): void {
+export function saveSettings(settingsFile: SettingsFile): void {
   try {
     // Ensure the directory exists
     const dirPath = path.dirname(settingsFile.path);
@@ -727,18 +713,18 @@ export function saveSettings(
       fs.mkdirSync(dirPath, { recursive: true });
     }
 
-    let settingsToSave = settingsFile.settings;
+    let settingsToSave = settingsFile.originalSettings;
     if (!MIGRATE_V2_OVERWRITE) {
       settingsToSave = migrateSettingsToV1(
         settingsToSave as Record<string, unknown>,
       ) as Settings;
     }
 
-    // Use the format-preserving update function to prevent env var leakage and maintain comments
+    // Use the format-preserving update function
     updateSettingsFilePreservingFormat(
       settingsFile.path,
       settingsToSave as Record<string, unknown>,
-      envVarMappings,
+      [],
     );
   } catch (error) {
     console.error('Error saving user settings file:', error);
