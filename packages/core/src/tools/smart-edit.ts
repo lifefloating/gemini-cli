@@ -7,6 +7,40 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as Diff from 'diff';
+
+/**
+ * Safely replaces text with literal strings, avoiding ECMAScript GetSubstitution issues.
+ * Uses split/join only when newString contains problematic $ sequences that would be
+ * misinterpreted by replaceAll() as replacement templates.
+ */
+function safeLiteralReplace(
+  str: string,
+  oldString: string,
+  newString: string,
+): string {
+  // Edge case: empty oldString
+  if (oldString === '') {
+    return str;
+  }
+
+  // Performance optimization: check if replacement is needed
+  if (!str.includes(oldString)) {
+    return str;
+  }
+
+  // Check if newString contains problematic $ sequences that replaceAll would misinterpret
+  // $' = text after match, $` = text before match, $& = the match itself, $n = capture groups
+  const hasProblematicDollar = /\$[&`']|\$\d/.test(newString);
+
+  if (hasProblematicDollar) {
+    // Use split/join to avoid ECMAScript GetSubstitution interpretation
+    return str.split(oldString).join(newString);
+  } else {
+    // Use native replaceAll for better performance when safe
+    return str.replaceAll(oldString, newString);
+  }
+}
+
 import {
   BaseDeclarativeTool,
   Kind,
@@ -70,9 +104,11 @@ async function calculateExactReplacement(
 
   const exactOccurrences = normalizedCode.split(normalizedSearch).length - 1;
   if (exactOccurrences > 0) {
-    let modifiedCode = normalizedCode
-      .split(normalizedSearch)
-      .join(normalizedReplace);
+    let modifiedCode = safeLiteralReplace(
+      normalizedCode,
+      normalizedSearch,
+      normalizedReplace,
+    );
     modifiedCode = restoreTrailingNewline(currentContent, modifiedCode);
     return {
       newContent: modifiedCode,

@@ -34,6 +34,39 @@ import type {
 } from './modifiable-tool.js';
 import { IdeClient, IDEConnectionStatus } from '../ide/ide-client.js';
 
+/**
+ * Safely replaces text with literal strings, avoiding ECMAScript GetSubstitution issues.
+ * Uses split/join only when newString contains problematic $ sequences that would be
+ * misinterpreted by replaceAll() as replacement templates.
+ */
+function safeLiteralReplace(
+  str: string,
+  oldString: string,
+  newString: string,
+): string {
+  // Edge case: empty oldString
+  if (oldString === '') {
+    return str;
+  }
+
+  // Performance optimization: check if replacement is needed
+  if (!str.includes(oldString)) {
+    return str;
+  }
+
+  // Check if newString contains problematic $ sequences that replaceAll would misinterpret
+  // $' = text after match, $` = text before match, $& = the match itself, $n = capture groups
+  const hasProblematicDollar = /\$[&`']|\$\d/.test(newString);
+
+  if (hasProblematicDollar) {
+    // Use split/join to avoid ECMAScript GetSubstitution interpretation
+    return str.split(oldString).join(newString);
+  } else {
+    // Use native replaceAll for better performance when safe
+    return str.replaceAll(oldString, newString);
+  }
+}
+
 export function applyReplacement(
   currentContent: string | null,
   oldString: string,
@@ -51,8 +84,9 @@ export function applyReplacement(
   if (oldString === '' && !isNewFile) {
     return currentContent;
   }
-  // Use split/join to ensure replacement
-  return currentContent.split(oldString).join(newString);
+
+  // Use intelligent replacement that handles $ sequences safely
+  return safeLiteralReplace(currentContent, oldString, newString);
 }
 
 /**
