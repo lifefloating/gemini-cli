@@ -7,7 +7,7 @@
 import type { ThoughtSummary } from '@google/gemini-cli-core';
 import type React from 'react';
 import { Box, Text } from 'ink';
-import { Colors } from '../colors.js';
+import { theme } from '../semantic-colors.js';
 import { useStreamingContext } from '../contexts/StreamingContext.js';
 import { StreamingState } from '../types.js';
 import { GeminiRespondingSpinner } from './GeminiRespondingSpinner.js';
@@ -57,13 +57,13 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
           />
         </Box>
         {primaryText && (
-          <Text color={Colors.AccentPurple} wrap="truncate-end">
+          <Text color={theme.text.accent} wrap="truncate-end">
             {primaryText}
             {cancelAndTimerContent ? ` ${cancelAndTimerContent}` : ''}
           </Text>
         )}
         {!primaryText && cancelAndTimerContent && (
-          <Text color={Colors.Gray} wrap="truncate-end">
+          <Text color={theme.text.secondary} wrap="truncate-end">
             {cancelAndTimerContent}
           </Text>
         )}
