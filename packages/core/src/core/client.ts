@@ -12,6 +12,7 @@ import type {
   Tool,
   GenerateContentResponse,
 } from '@google/genai';
+import { createUserContent } from '@google/genai';
 import {
   getDirectoryContextString,
   getEnvironmentContext,
@@ -453,7 +454,7 @@ export class GeminiClient {
       return new Turn(this.getChat(), prompt_id);
     }
 
-    const compressed = await this.tryCompressChat(prompt_id);
+    const compressed = await this.tryCompressChat(prompt_id, false, request);
 
     if (compressed.compressionStatus === CompressionStatus.COMPRESSED) {
       yield { type: GeminiEventType.ChatCompressed, value: compressed };
@@ -488,6 +489,9 @@ export class GeminiClient {
 
     const turn = new Turn(this.getChat(), prompt_id);
 
+    const controller = new AbortController();
+    const linkedSignal = AbortSignal.any([signal, controller.signal]);
+
     const loopDetected = await this.loopDetector.turnStarted(signal);
     if (loopDetected) {
       yield { type: GeminiEventType.LoopDetected };
@@ -513,10 +517,11 @@ export class GeminiClient {
       this.currentSequenceModel = modelToUse;
     }
 
-    const resultStream = turn.run(modelToUse, request, signal);
+    const resultStream = turn.run(modelToUse, request, linkedSignal);
     for await (const event of resultStream) {
       if (this.loopDetector.addAndCheck(event)) {
         yield { type: GeminiEventType.LoopDetected };
+        controller.abort();
         return turn;
       }
       yield event;
@@ -790,6 +795,7 @@ export class GeminiClient {
   async tryCompressChat(
     prompt_id: string,
     force: boolean = false,
+    request?: PartListUnion,
   ): Promise<ChatCompressionInfo> {
     // If the model is 'auto', we will use a placeholder model to check.
     // Compression occurs before we choose a model, so calling `count_tokens`
@@ -804,6 +810,10 @@ export class GeminiClient {
     model = getEffectiveModel(this.config.isInFallbackMode(), model);
 
     const curatedHistory = this.getChat().getHistory(true);
+
+    if (request) {
+      curatedHistory.push(createUserContent(request));
+    }
 
     // Regardless of `force`, don't do anything if the history is empty.
     if (
