@@ -39,12 +39,13 @@ import {
   initializeTelemetry,
   DEFAULT_TELEMETRY_TARGET,
   DEFAULT_OTLP_ENDPOINT,
+  uiTelemetryService,
 } from '../telemetry/index.js';
+import { tokenLimit } from '../core/tokenLimits.js';
 import { StartSessionEvent } from '../telemetry/index.js';
 import {
   DEFAULT_GEMINI_EMBEDDING_MODEL,
   DEFAULT_GEMINI_FLASH_MODEL,
-  DEFAULT_GEMINI_MODEL,
 } from './models.js';
 import { shouldAttemptBrowserLaunch } from '../utils/browser.js';
 import type { MCPOAuthConfig } from '../mcp/oauth-provider.js';
@@ -104,6 +105,7 @@ export interface TelemetrySettings {
   otlpProtocol?: 'grpc' | 'http';
   logPrompts?: boolean;
   outfile?: string;
+  useCollector?: boolean;
 }
 
 export interface OutputSettings {
@@ -240,6 +242,7 @@ export interface ConfigParameters {
   useSmartEdit?: boolean;
   policyEngineConfig?: PolicyEngineConfig;
   output?: OutputSettings;
+  useModelRouter?: boolean;
 }
 
 export class Config {
@@ -327,6 +330,7 @@ export class Config {
   private readonly messageBus: MessageBus;
   private readonly policyEngine: PolicyEngine;
   private readonly outputSettings: OutputSettings;
+  private readonly useModelRouter: boolean;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -361,6 +365,7 @@ export class Config {
       otlpProtocol: params.telemetry?.otlpProtocol,
       logPrompts: params.telemetry?.logPrompts ?? true,
       outfile: params.telemetry?.outfile,
+      useCollector: params.telemetry?.useCollector,
     };
     this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? true;
 
@@ -376,7 +381,7 @@ export class Config {
     this.cwd = params.cwd ?? process.cwd();
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
-    this.model = params.model || DEFAULT_GEMINI_MODEL;
+    this.model = params.model;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
     this.experimentalZedIntegration =
@@ -411,6 +416,7 @@ export class Config {
     this.enableToolOutputTruncation =
       params.enableToolOutputTruncation ?? false;
     this.useSmartEdit = params.useSmartEdit ?? true;
+    this.useModelRouter = params.useModelRouter ?? false;
     this.extensionManagement = params.extensionManagement ?? true;
     this.storage = new Storage(this.targetDir);
     this.enablePromptCompletion = params.enablePromptCompletion ?? false;
@@ -704,6 +710,10 @@ export class Config {
     return this.telemetrySettings.outfile;
   }
 
+  getTelemetryUseCollector(): boolean {
+    return this.telemetrySettings.useCollector ?? false;
+  }
+
   getGeminiClient(): GeminiClient {
     return this.geminiClient;
   }
@@ -914,7 +924,12 @@ export class Config {
   }
 
   getTruncateToolOutputThreshold(): number {
-    return this.truncateToolOutputThreshold;
+    return Math.min(
+      // Estimate remaining context window in characters (1 token ~= 4 chars).
+      4 *
+        (tokenLimit(this.model) - uiTelemetryService.getLastPromptTokenCount()),
+      this.truncateToolOutputThreshold,
+    );
   }
 
   getTruncateToolOutputLines(): number {
@@ -929,6 +944,10 @@ export class Config {
     return this.outputSettings?.format
       ? this.outputSettings.format
       : OutputFormat.TEXT;
+  }
+
+  getUseModelRouter(): boolean {
+    return this.useModelRouter;
   }
 
   async getGitService(): Promise<GitService> {
