@@ -28,6 +28,7 @@ interface ThemeDialogProps {
   settings: LoadedSettings;
   availableTerminalHeight?: number;
   terminalWidth: number;
+  ctrlCPressedOnce?: boolean;
 }
 
 export function ThemeDialog({
@@ -36,6 +37,7 @@ export function ThemeDialog({
   settings,
   availableTerminalHeight,
   terminalWidth,
+  ctrlCPressedOnce = false,
 }: ThemeDialogProps): React.JSX.Element {
   const [selectedScope, setSelectedScope] = useState<SettingScope>(
     SettingScope.User,
@@ -270,11 +272,14 @@ def fibonacci(n):
           initialScope={selectedScope}
         />
       )}
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text color={theme.text.secondary} wrap="truncate">
           (Use Enter to {mode === 'theme' ? 'select' : 'apply scope'}, Tab to{' '}
           {mode === 'theme' ? 'configure scope' : 'select theme'})
         </Text>
+        {ctrlCPressedOnce && (
+          <Text color={theme.status.warning}>Press Ctrl+C again to exit.</Text>
+        )}
       </Box>
     </Box>
   );

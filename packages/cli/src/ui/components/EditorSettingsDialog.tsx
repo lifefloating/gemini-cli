@@ -24,12 +24,14 @@ interface EditorDialogProps {
   onSelect: (editorType: EditorType | undefined, scope: SettingScope) => void;
   settings: LoadedSettings;
   onExit: () => void;
+  ctrlCPressedOnce?: boolean;
 }
 
 export function EditorSettingsDialog({
   onSelect,
   settings,
   onExit,
+  ctrlCPressedOnce = false,
 }: EditorDialogProps): React.JSX.Element {
   const [selectedScope, setSelectedScope] = useState<SettingScope>(
     SettingScope.User,
@@ -146,10 +148,15 @@ export function EditorSettingsDialog({
           />
         </Box>
 
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
           <Text color={theme.text.secondary}>
             (Use Enter to select, Tab to change focus)
           </Text>
+          {ctrlCPressedOnce && (
+            <Text color={theme.status.warning}>
+              Press Ctrl+C again to exit.
+            </Text>
+          )}
         </Box>
       </Box>
 

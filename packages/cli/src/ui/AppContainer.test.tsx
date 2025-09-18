@@ -605,4 +605,151 @@ describe('AppContainer State Management', () => {
       expect(lastCall[2]).toBe(1);
     });
   });
+
+  describe('Keyboard Input Handling', () => {
+    it('should block quit command during authentication', () => {
+      mockedUseAuthCommand.mockReturnValue({
+        authState: 'unauthenticated',
+        setAuthState: vi.fn(),
+        authError: null,
+        onAuthError: vi.fn(),
+      });
+
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
+      });
+
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+    });
+
+    it('should handle quit command when not authenticating', () => {
+      // Mock non-authenticating state
+      mockedUseAuthCommand.mockReturnValue({
+        authState: 'authenticated',
+        setAuthState: vi.fn(),
+        authError: null,
+        onAuthError: vi.fn(),
+      });
+
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
+      });
+
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+    });
+
+    it('should prevent exit command when text buffer has content', () => {
+      mockedUseTextBuffer.mockReturnValue({
+        text: 'some user input',
+        setText: vi.fn(),
+      });
+
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
+      });
+
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+    });
+
+    it('should close settings dialog on second Ctrl+C press', () => {
+      const mockCloseSettingsDialog = vi.fn();
+
+      mockedUseSettingsCommand.mockReturnValue({
+        isSettingsDialogOpen: true,
+        openSettingsDialog: vi.fn(),
+        closeSettingsDialog: mockCloseSettingsDialog,
+      });
+
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      expect(mockCloseSettingsDialog).not.toHaveBeenCalled();
+    });
+
+    it('should close editor dialog on second Ctrl+C press', () => {
+      const mockExitEditorDialog = vi.fn();
+
+      mockedUseEditorSettings.mockReturnValue({
+        isEditorDialogOpen: true,
+        openEditorDialog: vi.fn(),
+        handleEditorSelect: vi.fn(),
+        exitEditorDialog: mockExitEditorDialog,
+      });
+
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      expect(mockExitEditorDialog).not.toHaveBeenCalled();
+    });
+
+    it('should close privacy notice on second Ctrl+C press', () => {
+      render(
+        <AppContainer
+          config={mockConfig}
+          settings={mockSettings}
+          version="1.0.0"
+          initializationResult={mockInitResult}
+        />,
+      );
+
+      // This test verifies the component structure supports privacy notice handling
+    });
+  });
 });

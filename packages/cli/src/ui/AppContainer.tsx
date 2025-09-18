@@ -853,14 +853,64 @@ Logging in with Google... Please restart Gemini CLI to continue.
         console.log('[DEBUG] Keystroke:', JSON.stringify(key));
       }
 
-      const anyDialogOpen =
-        isThemeDialogOpen ||
-        isAuthDialogOpen ||
-        isEditorDialogOpen ||
-        isSettingsDialogOpen ||
-        isFolderTrustDialogOpen ||
-        showPrivacyNotice;
-      if (anyDialogOpen) {
+      if (keyMatchers[Command.QUIT](key)) {
+        if (isAuthenticating) {
+          return;
+        }
+
+        const anyDialogOpen =
+          isThemeDialogOpen ||
+          isAuthDialogOpen ||
+          isEditorDialogOpen ||
+          isSettingsDialogOpen ||
+          isFolderTrustDialogOpen ||
+          showPrivacyNotice;
+
+        if (anyDialogOpen) {
+          if (!ctrlCPressedOnce) {
+            setCtrlCPressedOnce(true);
+            ctrlCTimerRef.current = setTimeout(() => {
+              setCtrlCPressedOnce(false);
+              ctrlCTimerRef.current = null;
+            }, CTRL_EXIT_PROMPT_DURATION_MS);
+            return;
+          } else {
+            let dialogClosed = false;
+
+            if (isSettingsDialogOpen) {
+              closeSettingsDialog();
+              dialogClosed = true;
+            } else if (isEditorDialogOpen) {
+              exitEditorDialog();
+              dialogClosed = true;
+            } else if (isThemeDialogOpen) {
+              handleThemeSelect(undefined, SettingScope.User);
+              dialogClosed = true;
+            } else if (showPrivacyNotice) {
+              setShowPrivacyNotice(false);
+              dialogClosed = true;
+            }
+
+            if (dialogClosed) {
+              if (ctrlCTimerRef.current) {
+                clearTimeout(ctrlCTimerRef.current);
+                ctrlCTimerRef.current = null;
+              }
+              setCtrlCPressedOnce(false);
+            }
+          }
+        }
+
+        if (!ctrlCPressedOnce) {
+          cancelOngoingRequest?.();
+        }
+        handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
+        return;
+      } else if (keyMatchers[Command.EXIT](key)) {
+        if (buffer.text.length > 0) {
+          return;
+        }
+        handleExit(ctrlDPressedOnce, setCtrlDPressedOnce, ctrlDTimerRef);
         return;
       }
 
@@ -886,16 +936,6 @@ Logging in with Google... Please restart Gemini CLI to continue.
         ideContextState
       ) {
         handleSlashCommand('/ide status');
-      } else if (keyMatchers[Command.QUIT](key)) {
-        if (!ctrlCPressedOnce) {
-          cancelOngoingRequest?.();
-        }
-        handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
-      } else if (keyMatchers[Command.EXIT](key)) {
-        if (buffer.text.length > 0) {
-          return;
-        }
-        handleExit(ctrlDPressedOnce, setCtrlDPressedOnce, ctrlDTimerRef);
       } else if (
         keyMatchers[Command.SHOW_MORE_LINES](key) &&
         !enteringConstrainHeightMode
@@ -934,6 +974,10 @@ Logging in with Google... Please restart Gemini CLI to continue.
       activePtyId,
       shellFocused,
       settings.merged.general?.debugKeystrokeLogging,
+      closeSettingsDialog,
+      exitEditorDialog,
+      handleThemeSelect,
+      isAuthenticating,
     ],
   );
 
