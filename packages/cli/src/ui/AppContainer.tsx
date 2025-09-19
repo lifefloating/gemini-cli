@@ -866,7 +866,6 @@ Logging in with Google... Please restart Gemini CLI to continue.
       }
 
       if (keyMatchers[Command.QUIT](key)) {
-
         if (!ctrlCPressedOnce) {
           cancelOngoingRequest?.();
         }
@@ -941,16 +940,9 @@ Logging in with Google... Please restart Gemini CLI to continue.
       ctrlDTimerRef,
       handleSlashCommand,
       cancelOngoingRequest,
-      isThemeDialogOpen,
-      isAuthDialogOpen,
-      isEditorDialogOpen,
-      isSettingsDialogOpen,
-      isFolderTrustDialogOpen,
-      showPrivacyNotice,
       activePtyId,
       shellFocused,
       settings.merged.general?.debugKeystrokeLogging,
-      isAuthenticating,
     ],
   );
 
