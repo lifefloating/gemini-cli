@@ -65,25 +65,26 @@ jobs:
           permission-pull-requests: 'write'
           permission-contents: 'write'
 
-      - name: 'Create Patch for Stable'
-        if: "github.event.inputs.channel == 'stable'"
-        env:
-          GH_TOKEN: '${{ steps.generate_token.outputs.token }}'
-        run: 'node scripts/create-patch-pr.js --commit=${{ github.event.inputs.commit }} --channel=stable --dry-run=${{ github.event.inputs.dry_run }}'
-
-      - name: 'Create Patch for Preview'
+      - name: 'Create Patch'
         id: 'create_patch'
         env:
           GH_TOKEN: '${{ steps.generate_token.outputs.token }}'
-        run: 'node scripts/create-patch-pr.js --commit=${{ github.event.inputs.commit }} --channel=${{ github.event.inputs.channel }} --dry-run=${{ github.event.inputs.dry_run }}'
+        continue-on-error: true
+        run: |
+          node scripts/releasing/create-patch-pr.js --commit=${{ github.event.inputs.commit }} --channel=${{ github.event.inputs.channel }} --dry-run=${{ github.event.inputs.dry_run }} > patch_output.log 2>&1
+          echo "EXIT_CODE=$?" >> "$GITHUB_OUTPUT"
+          cat patch_output.log
 
       - name: 'Comment on Original PR'
         if: '!inputs.dry_run && inputs.original_pr'
         env:
           GH_TOKEN: '${{ steps.generate_token.outputs.token }}'
+          ORIGINAL_PR: '${{ github.event.inputs.original_pr }}'
+          EXIT_CODE: '${{ steps.create_patch.outputs.EXIT_CODE }}'
+          OUTPUT_LOG: 'patch_output.log'
+          COMMIT: '${{ github.event.inputs.commit }}'
+          CHANNEL: '${{ github.event.inputs.channel }}'
+          REPOSITORY: '${{ github.repository }}'
+          GITHUB_RUN_ID: '${{ github.run_id }}'
         run: |
-          gh pr comment ${{ github.event.inputs.original_pr }} --body "🚀 Patch PR created!
-
-          The patch release PR for this change has been created. Please review and approve it to complete the patch release:
-
-          View all patch PRs: https://github.com/${{ github.repository }}/pulls?q=is%3Apr+is%3Aopen+label%3Apatch"
+          node scripts/releasing/patch-create-comment.js
