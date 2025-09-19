@@ -42,7 +42,6 @@ interface SettingsDialogProps {
   settings: LoadedSettings;
   onSelect: (settingName: string | undefined, scope: SettingScope) => void;
   onRestartRequest?: () => void;
-  ctrlCPressedOnce?: boolean;
   availableTerminalHeight?: number;
 }
 
@@ -52,7 +51,6 @@ export function SettingsDialog({
   settings,
   onSelect,
   onRestartRequest,
-  ctrlCPressedOnce = false,
   availableTerminalHeight,
 }: SettingsDialogProps): React.JSX.Element {
   // Get vim mode context to sync vim mode changes
@@ -896,9 +894,6 @@ export function SettingsDialog({
           (Use Enter to select
           {showScopeSelection ? ', Tab to change focus' : ''})
         </Text>
-        {ctrlCPressedOnce && (
-          <Text color={theme.status.warning}>Press Ctrl+C again to exit.</Text>
-        )}
         {showRestartPrompt && (
           <Text color={theme.status.warning}>
             To see changes, Gemini CLI must be restarted. Press r to exit and

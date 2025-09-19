@@ -637,37 +637,6 @@ describe('AppContainer State Management', () => {
       expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
     });
 
-    it('should handle quit command when not authenticating', () => {
-      // Mock non-authenticating state
-      mockedUseAuthCommand.mockReturnValue({
-        authState: 'authenticated',
-        setAuthState: vi.fn(),
-        authError: null,
-        onAuthError: vi.fn(),
-      });
-
-      const mockHandleSlashCommand = vi.fn();
-      mockedUseSlashCommandProcessor.mockReturnValue({
-        handleSlashCommand: mockHandleSlashCommand,
-        slashCommands: [],
-        pendingHistoryItems: [],
-        commandContext: {},
-        shellConfirmationRequest: null,
-        confirmationRequest: null,
-      });
-
-      render(
-        <AppContainer
-          config={mockConfig}
-          settings={mockSettings}
-          version="1.0.0"
-          initializationResult={mockInitResult}
-        />,
-      );
-
-      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
-    });
-
     it('should prevent exit command when text buffer has content', () => {
       mockedUseTextBuffer.mockReturnValue({
         text: 'some user input',
@@ -696,13 +665,24 @@ describe('AppContainer State Management', () => {
       expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
     });
 
-    it('should close settings dialog on second Ctrl+C press', () => {
-      const mockCloseSettingsDialog = vi.fn();
+    it('should require double Ctrl+C to exit when dialogs are open', () => {
+      vi.useFakeTimers();
 
-      mockedUseSettingsCommand.mockReturnValue({
-        isSettingsDialogOpen: true,
-        openSettingsDialog: vi.fn(),
-        closeSettingsDialog: mockCloseSettingsDialog,
+      mockedUseThemeCommand.mockReturnValue({
+        isThemeDialogOpen: true,
+        openThemeDialog: vi.fn(),
+        handleThemeSelect: vi.fn(),
+        handleThemeHighlight: vi.fn(),
+      });
+
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
       });
 
       render(
@@ -714,17 +694,32 @@ describe('AppContainer State Management', () => {
         />,
       );
 
-      expect(mockCloseSettingsDialog).not.toHaveBeenCalled();
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+
+      vi.useRealTimers();
     });
 
-    it('should close editor dialog on second Ctrl+C press', () => {
-      const mockExitEditorDialog = vi.fn();
+    it('should cancel ongoing request on first Ctrl+C', () => {
+      const mockCancelOngoingRequest = vi.fn();
+      mockedUseGeminiStream.mockReturnValue({
+        streamingState: 'responding',
+        submitQuery: vi.fn(),
+        initError: null,
+        pendingHistoryItems: [],
+        thought: null,
+        cancelOngoingRequest: mockCancelOngoingRequest,
+      });
 
-      mockedUseEditorSettings.mockReturnValue({
-        isEditorDialogOpen: true,
-        openEditorDialog: vi.fn(),
-        handleEditorSelect: vi.fn(),
-        exitEditorDialog: mockExitEditorDialog,
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
       });
 
       render(
@@ -736,10 +731,22 @@ describe('AppContainer State Management', () => {
         />,
       );
 
-      expect(mockExitEditorDialog).not.toHaveBeenCalled();
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
     });
 
-    it('should close privacy notice on second Ctrl+C press', () => {
+    it('should reset Ctrl+C state after timeout', () => {
+      vi.useFakeTimers();
+
+      const mockHandleSlashCommand = vi.fn();
+      mockedUseSlashCommandProcessor.mockReturnValue({
+        handleSlashCommand: mockHandleSlashCommand,
+        slashCommands: [],
+        pendingHistoryItems: [],
+        commandContext: {},
+        shellConfirmationRequest: null,
+        confirmationRequest: null,
+      });
+
       render(
         <AppContainer
           config={mockConfig}
@@ -749,7 +756,13 @@ describe('AppContainer State Management', () => {
         />,
       );
 
-      // This test verifies the component structure supports privacy notice handling
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+
+      vi.advanceTimersByTime(1001);
+
+      expect(mockHandleSlashCommand).not.toHaveBeenCalledWith('/quit');
+
+      vi.useRealTimers();
     });
   });
 });

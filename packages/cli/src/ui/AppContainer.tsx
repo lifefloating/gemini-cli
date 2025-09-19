@@ -886,30 +886,6 @@ Logging in with Google... Please restart Gemini CLI to continue.
               ctrlCTimerRef.current = null;
             }, CTRL_EXIT_PROMPT_DURATION_MS);
             return;
-          } else {
-            let dialogClosed = false;
-
-            if (isSettingsDialogOpen) {
-              closeSettingsDialog();
-              dialogClosed = true;
-            } else if (isEditorDialogOpen) {
-              exitEditorDialog();
-              dialogClosed = true;
-            } else if (isThemeDialogOpen) {
-              handleThemeSelect(undefined, SettingScope.User);
-              dialogClosed = true;
-            } else if (showPrivacyNotice) {
-              setShowPrivacyNotice(false);
-              dialogClosed = true;
-            }
-
-            if (dialogClosed) {
-              if (ctrlCTimerRef.current) {
-                clearTimeout(ctrlCTimerRef.current);
-                ctrlCTimerRef.current = null;
-              }
-              setCtrlCPressedOnce(false);
-            }
           }
         }
 
@@ -986,9 +962,6 @@ Logging in with Google... Please restart Gemini CLI to continue.
       activePtyId,
       shellFocused,
       settings.merged.general?.debugKeystrokeLogging,
-      closeSettingsDialog,
-      exitEditorDialog,
-      handleThemeSelect,
       isAuthenticating,
     ],
   );

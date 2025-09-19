@@ -125,7 +125,6 @@ export const DialogManager = () => {
             constrainHeight ? terminalHeight - staticExtraHeight : undefined
           }
           terminalWidth={mainAreaWidth}
-          ctrlCPressedOnce={uiState.ctrlCPressedOnce}
         />
       </Box>
     );
@@ -137,7 +136,6 @@ export const DialogManager = () => {
           settings={settings}
           onSelect={() => uiActions.closeSettingsDialog()}
           onRestartRequest={() => process.exit(0)}
-          ctrlCPressedOnce={uiState.ctrlCPressedOnce}
           availableTerminalHeight={terminalHeight - staticExtraHeight}
         />
       </Box>
@@ -177,7 +175,6 @@ export const DialogManager = () => {
           onSelect={uiActions.handleEditorSelect}
           settings={settings}
           onExit={uiActions.exitEditorDialog}
-          ctrlCPressedOnce={uiState.ctrlCPressedOnce}
         />
       </Box>
     );
@@ -187,7 +184,6 @@ export const DialogManager = () => {
       <PrivacyNotice
         onExit={() => uiActions.exitPrivacyNotice()}
         config={config}
-        ctrlCPressedOnce={uiState.ctrlCPressedOnce}
       />
     );
   }
