@@ -38,6 +38,14 @@ export const App = () => {
               </Text>
             </Box>
           )}
+
+          {uiState.dialogsVisible && uiState.ctrlDPressedOnce && (
+            <Box marginTop={1}>
+              <Text color={theme.status.warning}>
+                Press Ctrl+D again to exit.
+              </Text>
+            </Box>
+          )}
         </Box>
       </Box>
     </StreamingContext.Provider>
