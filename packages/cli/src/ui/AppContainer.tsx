@@ -866,32 +866,20 @@ Logging in with Google... Please restart Gemini CLI to continue.
       }
 
       if (keyMatchers[Command.QUIT](key)) {
-        if (isAuthenticating) {
-          return;
-        }
-
-        const anyDialogOpen =
-          isThemeDialogOpen ||
-          isAuthDialogOpen ||
-          isEditorDialogOpen ||
-          isSettingsDialogOpen ||
-          isFolderTrustDialogOpen ||
-          showPrivacyNotice;
-
-        if (anyDialogOpen) {
-          if (!ctrlCPressedOnce) {
-            setCtrlCPressedOnce(true);
-            ctrlCTimerRef.current = setTimeout(() => {
-              setCtrlCPressedOnce(false);
-              ctrlCTimerRef.current = null;
-            }, CTRL_EXIT_PROMPT_DURATION_MS);
-            return;
-          }
-        }
 
         if (!ctrlCPressedOnce) {
           cancelOngoingRequest?.();
         }
+
+        if (!ctrlCPressedOnce) {
+          setCtrlCPressedOnce(true);
+          ctrlCTimerRef.current = setTimeout(() => {
+            setCtrlCPressedOnce(false);
+            ctrlCTimerRef.current = null;
+          }, CTRL_EXIT_PROMPT_DURATION_MS);
+          return;
+        }
+
         handleExit(ctrlCPressedOnce, setCtrlCPressedOnce, ctrlCTimerRef);
         return;
       } else if (keyMatchers[Command.EXIT](key)) {
