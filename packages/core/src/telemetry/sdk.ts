@@ -64,6 +64,12 @@ function parseOtlpEndpoint(
   // Trim leading/trailing quotes that might come from env variables
   const trimmedEndpoint = otlpEndpointSetting.replace(/^["']|["']$/g, '');
 
+  // Handle explicit disable values
+  const disableValues = ['no', 'none', 'false', 'disable', 'disabled', 'off'];
+  if (disableValues.includes(trimmedEndpoint.toLowerCase())) {
+    return undefined;
+  }
+
   try {
     const url = new URL(trimmedEndpoint);
     if (protocol === 'grpc') {
@@ -74,7 +80,11 @@ function parseOtlpEndpoint(
     // For http, use the full href.
     return url.href;
   } catch (error) {
-    diag.error('Invalid OTLP endpoint URL provided:', trimmedEndpoint, error);
+    if (trimmedEndpoint.includes('://') || trimmedEndpoint.includes('.')) {
+      diag.error('Invalid OTLP endpoint URL provided:', trimmedEndpoint, error);
+    } else {
+      diag.debug('OTLP endpoint not configured or disabled:', trimmedEndpoint);
+    }
     return undefined;
   }
 }
@@ -90,12 +100,8 @@ export function initializeTelemetry(config: Config): void {
     'session.id': config.getSessionId(),
   });
 
-  const otlpEndpoint = config.getTelemetryOtlpEndpoint();
-  const otlpProtocol = config.getTelemetryOtlpProtocol();
   const telemetryTarget = config.getTelemetryTarget();
   const useCollector = config.getTelemetryUseCollector();
-  const parsedEndpoint = parseOtlpEndpoint(otlpEndpoint, otlpProtocol);
-  const useOtlp = !!parsedEndpoint;
   const telemetryOutfile = config.getTelemetryOutfile();
 
   const gcpProjectId =
@@ -103,6 +109,17 @@ export function initializeTelemetry(config: Config): void {
     process.env['GOOGLE_CLOUD_PROJECT'];
   const useDirectGcpExport =
     telemetryTarget === TelemetryTarget.GCP && !!gcpProjectId && !useCollector;
+
+  const needsOtlp = !useDirectGcpExport && !telemetryOutfile;
+  let parsedEndpoint: string | undefined;
+  let useOtlp = false;
+
+  if (needsOtlp) {
+    const otlpEndpoint = config.getTelemetryOtlpEndpoint();
+    const otlpProtocol = config.getTelemetryOtlpProtocol();
+    parsedEndpoint = parseOtlpEndpoint(otlpEndpoint, otlpProtocol);
+    useOtlp = !!parsedEndpoint;
+  }
 
   let spanExporter:
     | OTLPTraceExporter
@@ -126,6 +143,7 @@ export function initializeTelemetry(config: Config): void {
       exportIntervalMillis: 30000,
     });
   } else if (useOtlp) {
+    const otlpProtocol = config.getTelemetryOtlpProtocol();
     if (otlpProtocol === 'http') {
       spanExporter = new OTLPTraceExporterHttp({
         url: parsedEndpoint,

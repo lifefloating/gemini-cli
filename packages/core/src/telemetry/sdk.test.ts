@@ -20,6 +20,11 @@ import {
   GcpMetricExporter,
 } from './gcp-exporters.js';
 import { TelemetryTarget } from './index.js';
+import {
+  FileSpanExporter,
+  FileLogExporter,
+  FileMetricExporter,
+} from './file-exporters.js';
 
 vi.mock('@opentelemetry/exporter-trace-otlp-grpc');
 vi.mock('@opentelemetry/exporter-logs-otlp-grpc');
@@ -29,6 +34,7 @@ vi.mock('@opentelemetry/exporter-logs-otlp-http');
 vi.mock('@opentelemetry/exporter-metrics-otlp-http');
 vi.mock('@opentelemetry/sdk-node');
 vi.mock('./gcp-exporters.js');
+vi.mock('./file-exporters.js');
 
 describe('Telemetry SDK', () => {
   let mockConfig: Config;
@@ -49,6 +55,132 @@ describe('Telemetry SDK', () => {
 
   afterEach(async () => {
     await shutdownTelemetry(mockConfig);
+  });
+
+  describe('OTLP Endpoint Parsing and Disable Values', () => {
+    it('should not initialize OTLP exporters when endpoint is "no"', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('no');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should not initialize OTLP exporters when endpoint is "false"', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('false');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should not initialize OTLP exporters when endpoint is "disable"', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+        'disable',
+      );
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should not initialize OTLP exporters when endpoint is "none"', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('none');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should not initialize OTLP exporters when endpoint is "off"', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('off');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should handle case-insensitive disable values', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('NO');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+  });
+
+  describe('File Output Optimization', () => {
+    it('should use file exporters when outfile is specified and not parse OTLP endpoint', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOutfile').mockReturnValue('test.log');
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('no');
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(FileSpanExporter).toHaveBeenCalledWith('test.log');
+      expect(FileLogExporter).toHaveBeenCalledWith('test.log');
+      expect(FileMetricExporter).toHaveBeenCalledWith('test.log');
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(OTLPLogExporter).not.toHaveBeenCalled();
+      expect(OTLPMetricExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
+
+    it('should skip OTLP parsing when using file output even with invalid endpoint', () => {
+      vi.spyOn(mockConfig, 'getTelemetryOutfile').mockReturnValue('output.log');
+      vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+        'invalid-url',
+      );
+      vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+        TelemetryTarget.LOCAL,
+      );
+
+      initializeTelemetry(mockConfig);
+
+      expect(FileSpanExporter).toHaveBeenCalledWith('output.log');
+      expect(FileLogExporter).toHaveBeenCalledWith('output.log');
+      expect(FileMetricExporter).toHaveBeenCalledWith('output.log');
+      expect(OTLPTraceExporter).not.toHaveBeenCalled();
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    });
   });
 
   it('should use gRPC exporters when protocol is grpc', () => {
