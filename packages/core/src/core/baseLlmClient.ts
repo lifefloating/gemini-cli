@@ -100,7 +100,7 @@ export class BaseLlmClient {
           promptId,
         );
 
-      const result = await retryWithBackoff(apiCall);
+      const result = await retryWithBackoff(apiCall, { abortSignal });
 
       let text = getResponseText(result)?.trim();
       if (!text) {

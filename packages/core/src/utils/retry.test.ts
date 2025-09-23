@@ -403,4 +403,141 @@ describe('retryWithBackoff', () => {
       expect(fallbackCallback).toHaveBeenCalledWith('oauth-personal');
     });
   });
+
+  describe('AbortSignal support', () => {
+    it('should abort immediately if signal is already aborted', async () => {
+      const mockFn = createFailingFunction(2);
+      const controller = new AbortController();
+      controller.abort();
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        abortSignal: controller.signal,
+      });
+
+      await expect(promise).rejects.toThrow('Aborted');
+      expect(mockFn).not.toHaveBeenCalled();
+    });
+
+    it('should abort during delay between retry attempts', async () => {
+      const mockFn = createFailingFunction(3);
+      const controller = new AbortController();
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 5,
+        initialDelayMs: 500,
+        abortSignal: controller.signal,
+      });
+
+      // Let first attempt fail, then abort during delay
+      setTimeout(() => {
+        expect(mockFn).toHaveBeenCalledTimes(1);
+        controller.abort();
+      }, 100);
+
+      // Handle the promise properly to avoid unhandled rejections
+      const resultPromise = promise.catch((error) => error);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toBe('Aborted');
+      expect(mockFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should abort during retry delay', async () => {
+      const controller = new AbortController();
+      const mockFn = createFailingFunction(2, 'success');
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        abortSignal: controller.signal,
+      });
+
+      // Abort after first failure during delay
+      setTimeout(() => {
+        controller.abort();
+      }, 50);
+
+      const resultPromise = promise.catch((error) => error);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toBe('Aborted');
+      expect(mockFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should complete successfully if not aborted', async () => {
+      const mockFn = createFailingFunction(1, 'success');
+      const controller = new AbortController();
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        abortSignal: controller.signal,
+      });
+
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result).toBe('success');
+      expect(mockFn).toHaveBeenCalledTimes(2);
+      expect(controller.signal.aborted).toBe(false);
+    });
+
+    it('should handle abort during Retry-After delay', async () => {
+      const controller = new AbortController();
+      const mockFn = vi.fn().mockImplementation(async () => {
+        const error: any = new Error('Rate limited');
+        error.status = 429;
+        error.response = {
+          status: 429,
+          headers: {
+            'retry-after': '2',
+          },
+        };
+        throw error;
+      });
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        abortSignal: controller.signal,
+      });
+
+      // Abort after first attempt during Retry-After delay
+      setTimeout(() => {
+        expect(mockFn).toHaveBeenCalledTimes(1);
+        controller.abort();
+      }, 100);
+
+      // Handle the promise properly to avoid unhandled rejections
+      const resultPromise = promise.catch((error) => error);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toBe('Aborted');
+      expect(mockFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should work correctly without abortSignal (backward compatibility)', async () => {
+      const mockFn = createFailingFunction(1, 'success');
+
+      const promise = retryWithBackoff(mockFn, {
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        // No abortSignal provided
+      });
+
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result).toBe('success');
+      expect(mockFn).toHaveBeenCalledTimes(2);
+    });
+  });
 });

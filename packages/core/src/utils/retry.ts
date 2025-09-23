@@ -24,6 +24,7 @@ export interface RetryOptions {
     error?: unknown,
   ) => Promise<string | boolean | null>;
   authType?: string;
+  abortSignal?: AbortSignal;
 }
 
 const DEFAULT_RETRY_OPTIONS: RetryOptions = {
@@ -64,6 +65,31 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Abort-aware delay that resolves when either the timeout elapses or the signal aborts.
+ */
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return delay(ms);
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      return reject(new Error('Aborted'));
+    }
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      cleanup();
+      reject(new Error('Aborted'));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
  * Retries a function with exponential backoff and jitter.
  * @param fn The asynchronous function to retry.
  * @param options Optional retry configuration.
@@ -81,6 +107,7 @@ export async function retryWithBackoff<T>(
     onPersistent429,
     authType,
     shouldRetry,
+    abortSignal,
   } = {
     ...DEFAULT_RETRY_OPTIONS,
     ...options,
@@ -91,6 +118,9 @@ export async function retryWithBackoff<T>(
   let consecutive429Count = 0;
 
   while (attempt < maxAttempts) {
+    if (abortSignal?.aborted) {
+      throw new Error('Aborted');
+    }
     attempt++;
     try {
       return await fn();
@@ -196,7 +226,7 @@ export async function retryWithBackoff<T>(
           `Attempt ${attempt} failed with status ${delayErrorStatus ?? 'unknown'}. Retrying after explicit delay of ${delayDurationMs}ms...`,
           error,
         );
-        await delay(delayDurationMs);
+        await delayWithAbort(delayDurationMs, abortSignal);
         // Reset currentDelay for next potential non-429 error, or if Retry-After is not present next time
         currentDelay = initialDelayMs;
       } else {
@@ -205,7 +235,7 @@ export async function retryWithBackoff<T>(
         // Add jitter: +/- 30% of currentDelay
         const jitter = currentDelay * 0.3 * (Math.random() * 2 - 1);
         const delayWithJitter = Math.max(0, currentDelay + jitter);
-        await delay(delayWithJitter);
+        await delayWithAbort(delayWithJitter, abortSignal);
         currentDelay = Math.min(maxDelayMs, currentDelay * 2);
       }
     }
