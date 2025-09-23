@@ -48,6 +48,10 @@ vi.mock('./config/config.js', () => ({
   parseArguments: vi.fn().mockResolvedValue({}),
 }));
 
+vi.mock('./config/extension.js', () => ({
+  loadExtensions: vi.fn().mockReturnValue([]),
+}));
+
 vi.mock('read-package-up', () => ({
   readPackageUp: vi.fn().mockResolvedValue({
     packageJson: { name: 'test-pkg', version: 'test-version' },
@@ -159,6 +163,78 @@ describe('gemini.tsx main function', () => {
 
     // Avoid the process.exit error from being thrown.
     processExitSpy.mockRestore();
+  });
+});
+
+describe('gemini.tsx loadExtensions behavior', () => {
+  let originalEnvNoRelaunch: string | undefined;
+  let originalEnvSandbox: string | undefined;
+
+  beforeEach(() => {
+    originalEnvNoRelaunch = process.env['GEMINI_CLI_NO_RELAUNCH'];
+    originalEnvSandbox = process.env['SANDBOX'];
+    delete process.env['SANDBOX'];
+  });
+
+  afterEach(() => {
+    if (originalEnvNoRelaunch !== undefined) {
+      process.env['GEMINI_CLI_NO_RELAUNCH'] = originalEnvNoRelaunch;
+    } else {
+      delete process.env['GEMINI_CLI_NO_RELAUNCH'];
+    }
+    if (originalEnvSandbox !== undefined) {
+      process.env['SANDBOX'] = originalEnvSandbox;
+    } else {
+      delete process.env['SANDBOX'];
+    }
+    vi.clearAllMocks();
+  });
+
+  it('should load extensions when GEMINI_CLI_NO_RELAUNCH is set', async () => {
+    process.env['GEMINI_CLI_NO_RELAUNCH'] = 'true';
+
+    const { loadExtensions } = await import('./config/extension.js');
+    const { loadCliConfig, parseArguments } = await import(
+      './config/config.js'
+    );
+    const { loadSettings } = await import('./config/settings.js');
+
+    vi.mocked(loadCliConfig).mockResolvedValue({
+      isInteractive: () => false,
+      getQuestion: () => 'test',
+      getSandbox: () => false,
+      getDebugMode: () => false,
+      getListExtensions: () => false,
+      getMcpServers: () => ({}),
+      initialize: vi.fn(),
+      getIdeMode: () => false,
+      getExperimentalZedIntegration: () => false,
+      getScreenReader: () => false,
+      getGeminiMdFileCount: () => 0,
+      getContentGeneratorConfig: () => ({ authType: 'test' }),
+    } as unknown as Config);
+
+    vi.mocked(loadSettings).mockReturnValue({
+      errors: [],
+      merged: {
+        advanced: {},
+        security: { auth: {} },
+        ui: {},
+      },
+      setValue: vi.fn(),
+      forScope: () => ({ settings: {}, originalSettings: {}, path: '' }),
+    } as never);
+
+    vi.mocked(parseArguments).mockResolvedValue({} as never);
+
+    try {
+      await main();
+    } catch (_error) {
+      // Ignore process.exit errors
+    }
+
+    // When GEMINI_CLI_NO_RELAUNCH is set, loadExtensions should be called
+    expect(loadExtensions).toHaveBeenCalled();
   });
 });
 

@@ -27,7 +27,7 @@ import { getStartupWarnings } from './utils/startupWarnings.js';
 import { getUserStartupWarnings } from './utils/userStartupWarnings.js';
 import { ConsolePatcher } from './ui/utils/ConsolePatcher.js';
 import { runNonInteractive } from './nonInteractiveCli.js';
-import { loadExtensions } from './config/extension.js';
+import { loadExtensions, type Extension } from './config/extension.js';
 import {
   cleanupCheckpoints,
   registerCleanup,
@@ -248,13 +248,20 @@ export async function main() {
   await cleanupCheckpoints();
 
   const argv = await parseArguments(settings.merged);
-  const extensions = loadExtensions();
-  const config = await loadCliConfig(
-    settings.merged,
-    extensions,
-    sessionId,
-    argv,
-  );
+
+  const willRelaunch =
+    !process.env['SANDBOX'] && !process.env['GEMINI_CLI_NO_RELAUNCH'];
+
+  let extensions: Extension[] = [];
+  let config: Config;
+
+  if (willRelaunch) {
+    config = await loadCliConfig(settings.merged, [], sessionId, argv);
+  } else {
+    // Final process: do full initialization with extensions
+    extensions = loadExtensions();
+    config = await loadCliConfig(settings.merged, extensions, sessionId, argv);
+  }
 
   // Check for invalid input combinations early to prevent crashes
   if (argv.promptInteractive && !process.stdin.isTTY) {
@@ -326,7 +333,18 @@ export async function main() {
     }
   }
 
-  const initializationResult = await initializeApp(config, settings);
+  let initializationResult: InitializationResult;
+  if (!willRelaunch) {
+    initializationResult = await initializeApp(config, settings);
+  } else {
+    // Parent process: skip initialization, will be done in child
+    initializationResult = {
+      authError: null,
+      themeError: null,
+      shouldOpenAuthDialog: false,
+      geminiMdFileCount: 0,
+    };
+  }
 
   // hop into sandbox if we are outside and sandboxing is enabled
   if (!process.env['SANDBOX']) {
@@ -392,6 +410,12 @@ export async function main() {
       // restarted if needed.
       await relaunchAppInChildProcess(memoryArgs);
     }
+  }
+
+  if (willRelaunch && process.env['GEMINI_CLI_NO_RELAUNCH']) {
+    extensions = loadExtensions();
+    config = await loadCliConfig(settings.merged, extensions, sessionId, argv);
+    initializationResult = await initializeApp(config, settings);
   }
 
   if (
