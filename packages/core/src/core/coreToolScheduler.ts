@@ -1078,7 +1078,7 @@ export class CoreToolScheduler {
             }
           })
           .catch((executionError: Error) => {
-            if (executionError.name === 'AbortError') {
+            if (signal.aborted) {
               this.setStatusInternal(
                 callId,
                 'cancelled',
