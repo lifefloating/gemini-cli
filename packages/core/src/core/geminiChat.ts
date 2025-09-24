@@ -385,7 +385,6 @@ export class GeminiChat {
       },
       onPersistent429: onPersistent429Callback,
       authType: this.config.getContentGeneratorConfig()?.authType,
-      abortSignal: params.config?.abortSignal,
     });
 
     return this.processStreamResponse(model, streamResponse);
