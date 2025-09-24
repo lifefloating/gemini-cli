@@ -20,6 +20,7 @@ import {
 import type { CallableTool, FunctionCall, Part } from '@google/genai';
 import { ToolErrorType } from './tool-error.js';
 import type { Config } from '../config/config.js';
+import { AbortError } from '../utils/errors.js';
 
 type ToolParams = Record<string, unknown>;
 
@@ -142,12 +143,12 @@ class DiscoveredMCPToolInvocation extends BaseToolInvocation<
     // Race MCP tool call with abort signal to respect cancellation
     const rawResponseParts = await new Promise<Part[]>((resolve, reject) => {
       if (signal.aborted) {
-        reject(new Error('Tool call aborted'));
+        reject(new AbortError('Tool call aborted'));
         return;
       }
       const onAbort = () => {
         cleanup();
-        reject(new Error('Tool call aborted'));
+        reject(new AbortError('Tool call aborted'));
       };
       const cleanup = () => {
         signal.removeEventListener('abort', onAbort);

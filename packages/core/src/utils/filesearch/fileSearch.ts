@@ -13,6 +13,7 @@ import { crawl } from './crawler.js';
 import type { FzfResultItem } from 'fzf';
 import { AsyncFzf } from 'fzf';
 import { unescapePath } from '../paths.js';
+import { AbortError } from '../errors.js';
 
 export interface FileSearchOptions {
   projectRoot: string;
@@ -24,13 +25,6 @@ export interface FileSearchOptions {
   enableRecursiveFileSearch: boolean;
   disableFuzzySearch: boolean;
   maxDepth?: number;
-}
-
-export class AbortError extends Error {
-  constructor(message = 'Search aborted') {
-    super(message);
-    this.name = 'AbortError';
-  }
 }
 
 /**

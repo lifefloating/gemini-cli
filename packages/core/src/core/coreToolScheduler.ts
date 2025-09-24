@@ -42,6 +42,7 @@ import * as path from 'node:path';
 import { doesToolInvocationMatch } from '../utils/tool-utils.js';
 import levenshtein from 'fast-levenshtein';
 import { ShellToolInvocation } from '../tools/shell.js';
+import { AbortError } from '../utils/errors.js';
 
 export type ValidatingToolCall = {
   status: 'validating';
@@ -1078,17 +1079,25 @@ export class CoreToolScheduler {
             }
           })
           .catch((executionError: Error) => {
-            this.setStatusInternal(
-              callId,
-              'error',
-              createErrorResponse(
-                scheduledCall.request,
-                executionError instanceof Error
-                  ? executionError
-                  : new Error(String(executionError)),
-                ToolErrorType.UNHANDLED_EXCEPTION,
-              ),
-            );
+            if (executionError instanceof AbortError) {
+              this.setStatusInternal(
+                callId,
+                'cancelled',
+                'User cancelled tool execution.',
+              );
+            } else {
+              this.setStatusInternal(
+                callId,
+                'error',
+                createErrorResponse(
+                  scheduledCall.request,
+                  executionError instanceof Error
+                    ? executionError
+                    : new Error(String(executionError)),
+                  ToolErrorType.UNHANDLED_EXCEPTION,
+                ),
+              );
+            }
           });
       });
     }
