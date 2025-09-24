@@ -9,7 +9,6 @@ import type { Config } from '@google/gemini-cli-core';
 import {
   DEFAULT_GEMINI_FLASH_LITE_MODEL,
   getResponseText,
-  AbortError,
 } from '@google/gemini-cli-core';
 import type { Content, GenerateContentConfig } from '@google/genai';
 import type { TextBuffer } from '../components/shared/text-buffer.js';
@@ -146,7 +145,12 @@ export function usePromptCompletion({
         }
       }
     } catch (error) {
-      if (!(signal.aborted || error instanceof AbortError)) {
+      if (
+        !(
+          signal.aborted ||
+          (error instanceof Error && error.name === 'AbortError')
+        )
+      ) {
         console.error('prompt completion error:', error);
         // Clear the last requested text to allow retry only on real errors
         lastRequestedTextRef.current = '';

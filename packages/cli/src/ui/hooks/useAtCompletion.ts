@@ -6,11 +6,7 @@
 
 import { useEffect, useReducer, useRef } from 'react';
 import type { Config, FileSearch } from '@google/gemini-cli-core';
-import {
-  FileSearchFactory,
-  escapePath,
-  AbortError,
-} from '@google/gemini-cli-core';
+import { FileSearchFactory, escapePath } from '@google/gemini-cli-core';
 import type { Suggestion } from '../components/SuggestionsDisplay.js';
 import { MAX_SUGGESTIONS_TO_SHOW } from '../components/SuggestionsDisplay.js';
 
@@ -220,7 +216,7 @@ export function useAtCompletion(props: UseAtCompletionProps): void {
         }));
         dispatch({ type: 'SEARCH_SUCCESS', payload: suggestions });
       } catch (error) {
-        if (!(error instanceof AbortError)) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
           dispatch({ type: 'ERROR' });
         }
       }

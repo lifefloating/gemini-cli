@@ -33,7 +33,6 @@ import {
   parseAndFormatApiError,
   ToolConfirmationOutcome,
   promptIdContext,
-  AbortError,
 } from '@google/gemini-cli-core';
 import { type Part, type PartListUnion, FinishReason } from '@google/genai';
 import type {
@@ -821,7 +820,7 @@ export const useGeminiStream = (
         } catch (error: unknown) {
           if (error instanceof UnauthorizedError) {
             onAuthError('Session expired or is unauthorized.');
-          } else if (!isNodeError(error) || !(error instanceof AbortError)) {
+          } else if (!isNodeError(error) || error.name !== 'AbortError') {
             addItem(
               {
                 type: MessageType.ERROR,
