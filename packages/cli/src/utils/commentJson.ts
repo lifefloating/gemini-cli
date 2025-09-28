@@ -44,8 +44,69 @@ function applyUpdates(
 ): Record<string, unknown> {
   const result = current;
 
+  function applyKeyDiff(
+    base: Record<string, unknown>,
+    desired: Record<string, unknown>,
+  ): void {
+    for (const existingKey of Object.getOwnPropertyNames(base)) {
+      if (!Object.prototype.hasOwnProperty.call(desired, existingKey)) {
+        delete base[existingKey];
+      }
+    }
+
+    for (const nextKey of Object.getOwnPropertyNames(desired)) {
+      const nextVal = desired[nextKey];
+      const baseVal = base[nextKey];
+
+      const isObj =
+        typeof nextVal === 'object' &&
+        nextVal !== null &&
+        !Array.isArray(nextVal);
+      const isBaseObj =
+        typeof baseVal === 'object' &&
+        baseVal !== null &&
+        !Array.isArray(baseVal);
+      const isArr = Array.isArray(nextVal);
+      const isBaseArr = Array.isArray(baseVal);
+
+      if (isObj && isBaseObj) {
+        applyKeyDiff(
+          baseVal as Record<string, unknown>,
+          nextVal as Record<string, unknown>,
+        );
+      } else if (isArr && isBaseArr) {
+        // In-place mutate arrays to preserve array-level comments on CommentArray
+        const baseArr = baseVal as unknown[];
+        const desiredArr = nextVal as unknown[];
+        baseArr.length = 0;
+        for (const el of desiredArr) {
+          baseArr.push(el);
+        }
+      } else {
+        base[nextKey] = nextVal;
+      }
+    }
+  }
+
   for (const key of Object.getOwnPropertyNames(updates)) {
     const value = updates[key];
+    if (key === 'mcpServers') {
+      const isValObj =
+        typeof value === 'object' && value !== null && !Array.isArray(value);
+      const isResultObj =
+        typeof result[key] === 'object' &&
+        result[key] !== null &&
+        !Array.isArray(result[key]);
+      if (isValObj && isResultObj) {
+        applyKeyDiff(
+          result[key] as Record<string, unknown>,
+          value as Record<string, unknown>,
+        );
+      } else {
+        result[key] = value;
+      }
+      continue;
+    }
     if (
       typeof value === 'object' &&
       value !== null &&

@@ -178,5 +178,111 @@ describe('commentJson', () => {
 
       consoleSpy.mockRestore();
     });
+
+    it('should handle array updates while preserving comments', () => {
+      const originalContent = `{
+        // Server configurations
+        "servers": [
+          // First server
+          "server1",
+          "server2" // Second server
+        ]
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        servers: ['server1', 'server3'],
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('// Server configurations');
+      expect(updatedContent).toContain('"server1"');
+      expect(updatedContent).toContain('"server3"');
+      expect(updatedContent).not.toContain('"server2"');
+    });
+
+    it('should preserve existing fields not mentioned in updates', () => {
+      const originalContent = `{
+        // Configuration
+        "model": "gemini-2.5-pro",
+        "ui": {
+          "theme": "dark",
+          "existingSetting": "value"
+        },
+        "preservedField": "keep me"
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        model: 'gemini-2.5-flash',
+        ui: {
+          theme: 'light',
+        },
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('// Configuration');
+      expect(updatedContent).toContain('"model": "gemini-2.5-flash"');
+      expect(updatedContent).toContain('"theme": "light"');
+      expect(updatedContent).toContain('"existingSetting": "value"');
+      expect(updatedContent).toContain('"preservedField": "keep me"');
+    });
+
+    it('should handle mcpServers field deletion properly', () => {
+      const originalContent = `{
+        "model": "gemini-2.5-pro",
+        "mcpServers": {
+          // Server to keep
+          "context7": {
+            "command": "node",
+            "args": ["server.js"]
+          },
+          // Server to remove
+          "oldServer": {
+            "command": "old",
+            "args": ["old.js"]
+          }
+        }
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        model: 'gemini-2.5-pro',
+        mcpServers: {
+          context7: {
+            command: 'node',
+            args: ['server.js'],
+          },
+        },
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('// Server to keep');
+      expect(updatedContent).toContain('"context7"');
+      expect(updatedContent).not.toContain('"oldServer"');
+      expect(updatedContent).not.toContain('// Server to remove');
+    });
+
+    it('should handle type conversion from object to array', () => {
+      const originalContent = `{
+        "data": {
+          "key": "value"
+        }
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        data: ['item1', 'item2'],
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('"data": [');
+      expect(updatedContent).toContain('"item1"');
+      expect(updatedContent).toContain('"item2"');
+    });
   });
 });
