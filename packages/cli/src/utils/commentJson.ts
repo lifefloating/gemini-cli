@@ -38,6 +38,64 @@ export function updateSettingsFilePreservingFormat(
   fs.writeFileSync(filePath, updatedContent, 'utf-8');
 }
 
+/**
+ * When deleting a property from a comment-json parsed object, relocate any
+ * leading/trailing comments that were attached to that property so they are not lost.
+ *
+ * This function re-attaches comments to the next sibling's leading comments if
+ * available, otherwise to the previous sibling's trailing comments, otherwise
+ * to the container's leading/trailing comments.
+ */
+function preserveCommentsOnPropertyDeletion(
+  container: Record<string, unknown>,
+  propName: string,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const target: any = container as any;
+  const beforeSym = Symbol.for(`before:${propName}`);
+  const afterSym = Symbol.for(`after:${propName}`);
+
+  const beforeComments = target[beforeSym] as unknown[] | undefined;
+  const afterComments = target[afterSym] as unknown[] | undefined;
+
+  if (!beforeComments && !afterComments) return;
+
+  const keys = Object.getOwnPropertyNames(container);
+  const idx = keys.indexOf(propName);
+  const nextKey = idx >= 0 && idx + 1 < keys.length ? keys[idx + 1] : undefined;
+  const prevKey = idx > 0 ? keys[idx - 1] : undefined;
+
+  function appendToSymbol(destSym: symbol, comments: unknown[]) {
+    if (!comments || comments.length === 0) return;
+    const existing = target[destSym];
+    target[destSym] = Array.isArray(existing)
+      ? existing.concat(comments)
+      : comments;
+  }
+
+  if (beforeComments && beforeComments.length > 0) {
+    if (nextKey) {
+      appendToSymbol(Symbol.for(`before:${nextKey}`), beforeComments);
+    } else if (prevKey) {
+      appendToSymbol(Symbol.for(`after:${prevKey}`), beforeComments);
+    } else {
+      appendToSymbol(Symbol.for('before'), beforeComments);
+    }
+    delete target[beforeSym];
+  }
+
+  if (afterComments && afterComments.length > 0) {
+    if (nextKey) {
+      appendToSymbol(Symbol.for(`before:${nextKey}`), afterComments);
+    } else if (prevKey) {
+      appendToSymbol(Symbol.for(`after:${prevKey}`), afterComments);
+    } else {
+      appendToSymbol(Symbol.for('after'), afterComments);
+    }
+    delete target[afterSym];
+  }
+}
+
 function applyUpdates(
   current: Record<string, unknown>,
   updates: Record<string, unknown>,
@@ -50,6 +108,7 @@ function applyUpdates(
   ): void {
     for (const existingKey of Object.getOwnPropertyNames(base)) {
       if (!Object.prototype.hasOwnProperty.call(desired, existingKey)) {
+        preserveCommentsOnPropertyDeletion(base, existingKey);
         delete base[existingKey];
       }
     }
@@ -90,23 +149,6 @@ function applyUpdates(
 
   for (const key of Object.getOwnPropertyNames(updates)) {
     const value = updates[key];
-    if (key === 'mcpServers') {
-      const isValObj =
-        typeof value === 'object' && value !== null && !Array.isArray(value);
-      const isResultObj =
-        typeof result[key] === 'object' &&
-        result[key] !== null &&
-        !Array.isArray(result[key]);
-      if (isValObj && isResultObj) {
-        applyKeyDiff(
-          result[key] as Record<string, unknown>,
-          value as Record<string, unknown>,
-        );
-      } else {
-        result[key] = value;
-      }
-      continue;
-    }
     if (
       typeof value === 'object' &&
       value !== null &&
@@ -115,7 +157,8 @@ function applyUpdates(
       result[key] !== null &&
       !Array.isArray(result[key])
     ) {
-      result[key] = applyUpdates(
+      // Universal sync-by-omission for nested objects to keep semantics consistent
+      applyKeyDiff(
         result[key] as Record<string, unknown>,
         value as Record<string, unknown>,
       );

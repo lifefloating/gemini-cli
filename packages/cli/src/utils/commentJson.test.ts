@@ -202,7 +202,7 @@ describe('commentJson', () => {
       expect(updatedContent).not.toContain('"server2"');
     });
 
-    it('should preserve existing fields not mentioned in updates', () => {
+    it('should sync nested objects, removing omitted fields', () => {
       const originalContent = `{
         // Configuration
         "model": "gemini-2.5-pro",
@@ -226,7 +226,7 @@ describe('commentJson', () => {
       expect(updatedContent).toContain('// Configuration');
       expect(updatedContent).toContain('"model": "gemini-2.5-flash"');
       expect(updatedContent).toContain('"theme": "light"');
-      expect(updatedContent).toContain('"existingSetting": "value"');
+      expect(updatedContent).not.toContain('"existingSetting": "value"');
       expect(updatedContent).toContain('"preservedField": "keep me"');
     });
 
@@ -263,7 +263,41 @@ describe('commentJson', () => {
       expect(updatedContent).toContain('// Server to keep');
       expect(updatedContent).toContain('"context7"');
       expect(updatedContent).not.toContain('"oldServer"');
-      expect(updatedContent).not.toContain('// Server to remove');
+      // The comment for the removed server should still be preserved
+      expect(updatedContent).toContain('// Server to remove');
+    });
+
+    it('preserves sibling-level commented-out blocks when removing another key', () => {
+      const originalContent = `{
+        "mcpServers": {
+          // "sleep": {
+          //   "command": "node",
+          //   "args": [
+          //     "/Users/testUser/test-mcp-server/sleep-mcp/build/index.js"
+          //   ],
+          //   "timeout": 300000
+          // },
+          "playwright": {
+            "command": "npx",
+            "args": [
+              "@playwright/mcp@latest",
+              "--headless",
+              "--isolated"
+            ]
+          }
+        }
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        mcpServers: {},
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+      expect(updatedContent).toContain('// "sleep": {');
+      expect(updatedContent).toContain('"mcpServers"');
+      expect(updatedContent).not.toContain('"playwright"');
     });
 
     it('should handle type conversion from object to array', () => {
