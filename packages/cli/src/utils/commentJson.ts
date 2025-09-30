@@ -8,6 +8,11 @@ import * as fs from 'node:fs';
 import { parse, stringify } from 'comment-json';
 
 /**
+ * Type representing an object that may contain Symbol keys for comments.
+ */
+type CommentedRecord = Record<string | symbol, unknown>;
+
+/**
  * Updates a JSON file while preserving comments and formatting.
  */
 export function updateSettingsFilePreservingFormat(
@@ -50,8 +55,7 @@ function preserveCommentsOnPropertyDeletion(
   container: Record<string, unknown>,
   propName: string,
 ): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const target: any = container as any;
+  const target = container as CommentedRecord;
   const beforeSym = Symbol.for(`before:${propName}`);
   const afterSym = Symbol.for(`after:${propName}`);
 
@@ -96,76 +100,63 @@ function preserveCommentsOnPropertyDeletion(
   }
 }
 
+/**
+ * Applies sync-by-omission semantics: synchronizes base to match desired.
+ * - Adds/updates keys from desired
+ * - Removes keys from base that are not in desired
+ * - Recursively applies to nested objects
+ * - Preserves comments when deleting keys
+ */
+function applyKeyDiff(
+  base: Record<string, unknown>,
+  desired: Record<string, unknown>,
+): void {
+  for (const existingKey of Object.getOwnPropertyNames(base)) {
+    if (!Object.prototype.hasOwnProperty.call(desired, existingKey)) {
+      preserveCommentsOnPropertyDeletion(base, existingKey);
+      delete base[existingKey];
+    }
+  }
+
+  for (const nextKey of Object.getOwnPropertyNames(desired)) {
+    const nextVal = desired[nextKey];
+    const baseVal = base[nextKey];
+
+    const isObj =
+      typeof nextVal === 'object' &&
+      nextVal !== null &&
+      !Array.isArray(nextVal);
+    const isBaseObj =
+      typeof baseVal === 'object' &&
+      baseVal !== null &&
+      !Array.isArray(baseVal);
+    const isArr = Array.isArray(nextVal);
+    const isBaseArr = Array.isArray(baseVal);
+
+    if (isObj && isBaseObj) {
+      applyKeyDiff(
+        baseVal as Record<string, unknown>,
+        nextVal as Record<string, unknown>,
+      );
+    } else if (isArr && isBaseArr) {
+      // In-place mutate arrays to preserve array-level comments on CommentArray
+      const baseArr = baseVal as unknown[];
+      const desiredArr = nextVal as unknown[];
+      baseArr.length = 0;
+      for (const el of desiredArr) {
+        baseArr.push(el);
+      }
+    } else {
+      base[nextKey] = nextVal;
+    }
+  }
+}
+
 function applyUpdates(
   current: Record<string, unknown>,
   updates: Record<string, unknown>,
 ): Record<string, unknown> {
-  const result = current;
-
-  function applyKeyDiff(
-    base: Record<string, unknown>,
-    desired: Record<string, unknown>,
-  ): void {
-    for (const existingKey of Object.getOwnPropertyNames(base)) {
-      if (!Object.prototype.hasOwnProperty.call(desired, existingKey)) {
-        preserveCommentsOnPropertyDeletion(base, existingKey);
-        delete base[existingKey];
-      }
-    }
-
-    for (const nextKey of Object.getOwnPropertyNames(desired)) {
-      const nextVal = desired[nextKey];
-      const baseVal = base[nextKey];
-
-      const isObj =
-        typeof nextVal === 'object' &&
-        nextVal !== null &&
-        !Array.isArray(nextVal);
-      const isBaseObj =
-        typeof baseVal === 'object' &&
-        baseVal !== null &&
-        !Array.isArray(baseVal);
-      const isArr = Array.isArray(nextVal);
-      const isBaseArr = Array.isArray(baseVal);
-
-      if (isObj && isBaseObj) {
-        applyKeyDiff(
-          baseVal as Record<string, unknown>,
-          nextVal as Record<string, unknown>,
-        );
-      } else if (isArr && isBaseArr) {
-        // In-place mutate arrays to preserve array-level comments on CommentArray
-        const baseArr = baseVal as unknown[];
-        const desiredArr = nextVal as unknown[];
-        baseArr.length = 0;
-        for (const el of desiredArr) {
-          baseArr.push(el);
-        }
-      } else {
-        base[nextKey] = nextVal;
-      }
-    }
-  }
-
-  for (const key of Object.getOwnPropertyNames(updates)) {
-    const value = updates[key];
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      !Array.isArray(value) &&
-      typeof result[key] === 'object' &&
-      result[key] !== null &&
-      !Array.isArray(result[key])
-    ) {
-      // Universal sync-by-omission for nested objects to keep semantics consistent
-      applyKeyDiff(
-        result[key] as Record<string, unknown>,
-        value as Record<string, unknown>,
-      );
-    } else {
-      result[key] = value;
-    }
-  }
-
-  return result;
+  // Apply sync-by-omission semantics consistently at all levels
+  applyKeyDiff(current, updates);
+  return current;
 }

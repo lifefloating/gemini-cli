@@ -42,6 +42,9 @@ describe('commentJson', () => {
 
       updateSettingsFilePreservingFormat(testFilePath, {
         model: 'gemini-2.5-flash',
+        ui: {
+          theme: 'dark',
+        },
       });
 
       const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
@@ -220,6 +223,7 @@ describe('commentJson', () => {
         ui: {
           theme: 'light',
         },
+        preservedField: 'keep me',
       });
 
       const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
