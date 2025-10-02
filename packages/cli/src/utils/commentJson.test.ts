@@ -322,5 +322,50 @@ describe('commentJson', () => {
       expect(updatedContent).toContain('"item1"');
       expect(updatedContent).toContain('"item2"');
     });
+
+    it('should remove both nested and non-nested objects when omitted', () => {
+      const originalContent = `{
+        // Top-level config
+        "topLevelObject": {
+          "field1": "value1",
+          "field2": "value2"
+        },
+        // Parent object
+        "parent": {
+          "nestedObject": {
+            "nestedField1": "value1",
+            "nestedField2": "value2"
+          },
+          "keepThis": "value"
+        },
+        // This should be preserved
+        "preservedObject": {
+          "data": "keep"
+        }
+      }`;
+
+      fs.writeFileSync(testFilePath, originalContent, 'utf-8');
+
+      updateSettingsFilePreservingFormat(testFilePath, {
+        parent: {
+          keepThis: 'value',
+        },
+        preservedObject: {
+          data: 'keep',
+        },
+      });
+
+      const updatedContent = fs.readFileSync(testFilePath, 'utf-8');
+
+      expect(updatedContent).not.toContain('"topLevelObject"');
+
+      expect(updatedContent).not.toContain('"nestedObject"');
+
+      expect(updatedContent).toContain('"keepThis": "value"');
+      expect(updatedContent).toContain('"preservedObject"');
+      expect(updatedContent).toContain('"data": "keep"');
+
+      expect(updatedContent).toContain('// This should be preserved');
+    });
   });
 });
