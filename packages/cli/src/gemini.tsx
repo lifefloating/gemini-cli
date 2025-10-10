@@ -39,6 +39,7 @@ import {
   logUserPrompt,
   AuthType,
   getOauthClient,
+  UserPromptEvent,
 } from '@google/gemini-cli-core';
 import {
   initializeApp,
@@ -46,6 +47,8 @@ import {
 } from './core/initializer.js';
 import { validateAuthMethod } from './config/auth.js';
 import { setMaxSizedBoxDebugging } from './ui/components/shared/MaxSizedBox.js';
+import { runZedIntegration } from './zed-integration/zedIntegration.js';
+import { cleanupExpiredSessions } from './utils/sessionCleanup.js';
 import { validateNonInteractiveAuth } from './validateNonInterActiveAuth.js';
 import { detectAndEnableKittyProtocol } from './ui/utils/kittyProtocolDetector.js';
 import { checkForUpdates } from './ui/utils/updateCheck.js';
@@ -62,6 +65,8 @@ import {
   relaunchAppInChildProcess,
   relaunchOnExitCode,
 } from './utils/relaunch.js';
+import { loadSandboxConfig } from './config/sandboxConfig.js';
+import { ExtensionEnablementManager } from './config/extensions/extensionEnablement.js';
 
 export function validateDnsResolutionOrder(
   order: string | undefined,
@@ -111,10 +116,6 @@ function getNodeMemoryArgs(isDebugMode: boolean): string[] {
   return [];
 }
 
-import { runZedIntegration } from './zed-integration/zedIntegration.js';
-import { loadSandboxConfig } from './config/sandboxConfig.js';
-import { ExtensionEnablementManager } from './config/extensions/extensionEnablement.js';
-
 export function setupUnhandledRejectionHandler() {
   let unhandledRejectionOccurred = false;
   process.on('unhandledRejection', (reason, _promise) => {
@@ -144,6 +145,22 @@ export async function startInteractiveUI(
   workspaceRoot: string = process.cwd(),
   initializationResult: InitializationResult,
 ) {
+  // Disable line wrapping.
+  // We rely on Ink to manage all line wrapping by forcing all content to be
+  // narrower than the terminal width so there is no need for the terminal to
+  // also attempt line wrapping.
+  // Disabling line wrapping reduces Ink rendering artifacts particularly when
+  // the terminal is resized on terminals that full respect this escape code
+  // such as Ghostty. Some terminals such as Iterm2 only respect line wrapping
+  // when using the alternate buffer, which Gemini CLI does not use because we
+  // do not yet have support for scrolling in that mode.
+  process.stdout.write('\x1b[?7l');
+
+  registerCleanup(() => {
+    // Re-enable line wrapping on exit.
+    process.stdout.write('\x1b[?7h');
+  });
+
   const version = await getCliVersion();
   setWindowTitle(basename(workspaceRoot), settings);
 
@@ -351,10 +368,13 @@ export async function main() {
       argv,
     );
 
+    // Cleanup sessions after config initialization
+    await cleanupExpiredSessions(config, settings.merged);
+
     if (config.getListExtensions()) {
       console.log('Installed extensions:');
       for (const extension of extensions) {
-        console.log(`- ${extension.config.name}`);
+        console.log(`- ${extension.name}`);
       }
       process.exit(0);
     }
@@ -433,14 +453,15 @@ export async function main() {
     }
 
     const prompt_id = Math.random().toString(16).slice(2);
-    logUserPrompt(config, {
-      'event.name': 'user_prompt',
-      'event.timestamp': new Date().toISOString(),
-      prompt: input,
-      prompt_id,
-      auth_type: config.getContentGeneratorConfig()?.authType,
-      prompt_length: input.length,
-    });
+    logUserPrompt(
+      config,
+      new UserPromptEvent(
+        input.length,
+        prompt_id,
+        config.getContentGeneratorConfig()?.authType,
+        input,
+      ),
+    );
 
     const nonInteractiveConfig = await validateNonInteractiveAuth(
       settings.merged.security?.auth?.selectedType,
