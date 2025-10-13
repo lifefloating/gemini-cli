@@ -35,7 +35,6 @@ import {
   MODIFIER_ALT_BIT,
   MODIFIER_CTRL_BIT,
 } from '../utils/platformConstants.js';
-import { stripUnsafeCharacters } from '../utils/textUtils.js';
 
 import { FOCUS_IN, FOCUS_OUT } from '../hooks/useFocus.js';
 
@@ -674,21 +673,13 @@ export function KeypressProvider({
         markerLength = pasteModeSuffixBuffer.length;
 
         if (nextMarkerPos === -1) {
-          const cleanedData = Buffer.from(
-            stripUnsafeCharacters(data.slice(pos).toString('utf8')),
-            'utf8',
-          );
-          keypressStream.write(cleanedData);
+          keypressStream.write(data.slice(pos));
           return;
         }
 
         const nextData = data.slice(pos, nextMarkerPos);
         if (nextData.length > 0) {
-          const cleanedData = Buffer.from(
-            stripUnsafeCharacters(nextData.toString('utf8')),
-            'utf8',
-          );
-          keypressStream.write(cleanedData);
+          keypressStream.write(nextData);
         }
         const createPasteKeyEvent = (
           name: 'paste-start' | 'paste-end',

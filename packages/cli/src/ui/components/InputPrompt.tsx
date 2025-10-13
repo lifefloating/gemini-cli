@@ -12,7 +12,12 @@ import { theme } from '../semantic-colors.js';
 import { useInputHistory } from '../hooks/useInputHistory.js';
 import type { TextBuffer } from './shared/text-buffer.js';
 import { logicalPosToOffset } from './shared/text-buffer.js';
-import { cpSlice, cpLen, toCodePoints } from '../utils/textUtils.js';
+import {
+  cpSlice,
+  cpLen,
+  toCodePoints,
+  stripUnsafeCharacters,
+} from '../utils/textUtils.js';
 import chalk from 'chalk';
 import stringWidth from 'string-width';
 import { useShellHistory } from '../hooks/useShellHistory.js';
@@ -339,8 +344,14 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             pasteTimeoutRef.current = null;
           }, 40);
         }
+        // Strip ANSI escape sequences from pasted content to prevent terminal crashes
+        const cleanedSequence = stripUnsafeCharacters(key.sequence);
+        const cleanedKey: Key = {
+          ...key,
+          sequence: cleanedSequence,
+        };
         // Ensure we never accidentally interpret paste as regular input.
-        buffer.handleInput(key);
+        buffer.handleInput(cleanedKey);
         return;
       }
 

@@ -1537,6 +1537,53 @@ describe('InputPrompt', () => {
     });
   });
 
+  describe('ANSI stripping in pasted content', () => {
+    it('should strip ANSI escape sequences from pasted content', async () => {
+      // Create text with ANSI escape sequences
+      const pastedTextWithAnsi =
+        'Error: \x1b[0mSomething went wrong\x1b[39m at line 42';
+      const expectedCleanText = 'Error: Something went wrong at line 42';
+
+      const { stdin, unmount } = renderWithProviders(
+        <InputPrompt {...props} />,
+      );
+      await wait();
+
+      // Simulate a bracketed paste event with ANSI codes
+      stdin.write(`\x1b[200~${pastedTextWithAnsi}\x1b[201~`);
+      await wait();
+
+      expect(props.buffer.handleInput).toHaveBeenCalledTimes(1);
+      const calledWith = vi.mocked(props.buffer.handleInput).mock.calls[0][0];
+      expect(calledWith.paste).toBe(true);
+      expect(calledWith.sequence).not.toContain('\x1b[');
+      expect(calledWith.sequence).toBe(expectedCleanText);
+
+      unmount();
+    });
+
+    it('should strip multiple ANSI sequences from complex pasted content', async () => {
+      // Multiple ANSI codes (colors, reset codes, etc.)
+      const pastedTextWithMultipleAnsi =
+        '\x1b[31mError:\x1b[0m \x1b[1mBold text\x1b[22m \x1b[4mUnderlined\x1b[24m';
+      const expectedCleanText = 'Error: Bold text Underlined';
+
+      const { stdin, unmount } = renderWithProviders(
+        <InputPrompt {...props} />,
+      );
+      await wait();
+
+      stdin.write(`\x1b[200~${pastedTextWithMultipleAnsi}\x1b[201~`);
+      await wait();
+
+      const calledWith = vi.mocked(props.buffer.handleInput).mock.calls[0][0];
+      expect(calledWith.sequence).not.toContain('\x1b[');
+      expect(calledWith.sequence).toBe(expectedCleanText);
+
+      unmount();
+    });
+  });
+
   describe('paste auto-submission protection', () => {
     beforeEach(() => {
       vi.useFakeTimers();
