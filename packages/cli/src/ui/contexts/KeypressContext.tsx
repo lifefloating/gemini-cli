@@ -37,11 +37,19 @@ import {
 } from '../utils/platformConstants.js';
 
 import { FOCUS_IN, FOCUS_OUT } from '../hooks/useFocus.js';
+import {
+  logPasteStart,
+  logPasteEnd,
+  logKeypress,
+  logPasteBufferAccumulation,
+  logDragDrop,
+} from '../utils/pasteDebugLogger.js';
 
 const ESC = '\u001B';
 export const PASTE_MODE_PREFIX = `${ESC}[200~`;
 export const PASTE_MODE_SUFFIX = `${ESC}[201~`;
 export const DRAG_COMPLETION_TIMEOUT_MS = 100; // Broadcast full path after 100ms if no more input
+export const RAPID_INPUT_DETECTION_MS = 50; // If chars arrive within 50ms, treat as paste (increased for Windows multi-line paste)
 export const SINGLE_QUOTE = "'";
 export const DOUBLE_QUOTE = '"';
 
@@ -123,6 +131,10 @@ export function KeypressProvider({
   const dragBufferRef = useRef('');
   const draggingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Rapid input detection for Windows paste (where bracketed paste is unreliable)
+  const rapidInputBufferRef = useRef<string>('');
+  const rapidInputTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const subscribe = useCallback(
     (handler: KeypressHandler) => {
       subscribers.add(handler);
@@ -142,6 +154,13 @@ export function KeypressProvider({
       if (draggingTimerRef.current) {
         clearTimeout(draggingTimerRef.current);
         draggingTimerRef.current = null;
+      }
+    };
+
+    const clearRapidInputTimer = () => {
+      if (rapidInputTimerRef.current) {
+        clearTimeout(rapidInputTimerRef.current);
+        rapidInputTimerRef.current = null;
       }
     };
 
@@ -423,31 +442,125 @@ export function KeypressProvider({
       }
       if (key.name === 'paste-start') {
         isPaste = true;
+        logPasteStart(kittyProtocolEnabled, kittyProtocolEnabled);
         return;
       }
       if (key.name === 'paste-end') {
         isPaste = false;
+        const pasteContent = pasteBuffer.toString();
+        // Normalize line endings early for Windows
+        const normalizedContent = pasteContent
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n');
+        const lineCount = normalizedContent.split('\n').length;
+        logPasteEnd(normalizedContent, lineCount);
         broadcast({
           name: '',
           ctrl: false,
           meta: false,
           shift: false,
           paste: true,
-          sequence: pasteBuffer.toString(),
+          sequence: normalizedContent,
         });
         pasteBuffer = Buffer.alloc(0);
         return;
       }
 
       if (isPaste) {
+        const beforeSize = pasteBuffer.length;
         pasteBuffer = Buffer.concat([pasteBuffer, Buffer.from(key.sequence)]);
+        logPasteBufferAccumulation(beforeSize, key.sequence);
         return;
       }
 
+      // Rapid input detection for Windows paste (where bracketed paste is unreliable)
+      // On Windows, accumulate normal characters and use a timeout to detect paste vs typing
+      const isWindows = process.platform === 'win32';
+
       if (
-        key.sequence === SINGLE_QUOTE ||
-        key.sequence === DOUBLE_QUOTE ||
-        isDraggingRef.current
+        isWindows &&
+        !key.ctrl &&
+        !key.meta &&
+        key.name !== 'return' &&
+        key.name !== 'escape' &&
+        key.name !== 'backspace' &&
+        key.name !== 'delete' &&
+        // Don't intercept navigation keys - they need immediate handling
+        key.name !== 'up' &&
+        key.name !== 'down' &&
+        key.name !== 'left' &&
+        key.name !== 'right' &&
+        key.name !== 'home' &&
+        key.name !== 'end' &&
+        key.name !== 'pageup' &&
+        key.name !== 'pagedown'
+      ) {
+        // Accept both single characters and multi-character sequences
+        // This helps capture paste content that may arrive in chunks
+        const shouldAccumulate =
+          key.sequence.length > 0 && !/[\r\n]/.test(key.sequence); // Don't accumulate line breaks
+
+        if (shouldAccumulate) {
+          // Accumulate this content
+          rapidInputBufferRef.current += key.sequence;
+
+          clearRapidInputTimer();
+          rapidInputTimerRef.current = setTimeout(() => {
+            const seq = rapidInputBufferRef.current;
+            rapidInputBufferRef.current = '';
+            if (seq) {
+              // Normalize line endings - handle all combinations
+              const normalized = seq
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n');
+              // If accumulated multiple chars, likely a paste; single char is normal typing
+              const isPasteLikely = normalized.length > 1;
+              if (isPasteLikely) {
+                logPasteEnd(normalized, normalized.split('\n').length);
+              }
+              broadcast({
+                name: '',
+                ctrl: false,
+                meta: false,
+                shift: false,
+                paste: isPasteLikely,
+                sequence: normalized,
+              });
+            }
+          }, RAPID_INPUT_DETECTION_MS);
+          return;
+        }
+      }
+
+      // If we have accumulated input but this key breaks the accumulation pattern, flush it first
+      if (isWindows && rapidInputBufferRef.current) {
+        const seq = rapidInputBufferRef.current;
+        rapidInputBufferRef.current = '';
+        clearRapidInputTimer();
+        if (seq) {
+          const normalized = seq.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          const isPasteLikely = normalized.length > 1;
+          if (isPasteLikely) {
+            logPasteEnd(normalized, normalized.split('\n').length);
+          }
+          broadcast({
+            name: '',
+            ctrl: false,
+            meta: false,
+            shift: false,
+            paste: isPasteLikely,
+            sequence: normalized,
+          });
+        }
+        // Continue to process the current key below
+      }
+
+      // Drag and drop detection (disabled on Windows to avoid conflicts with paste)
+      if (
+        !isWindows &&
+        (key.sequence === SINGLE_QUOTE ||
+          key.sequence === DOUBLE_QUOTE ||
+          isDraggingRef.current)
       ) {
         isDraggingRef.current = true;
         dragBufferRef.current += key.sequence;
@@ -457,11 +570,13 @@ export function KeypressProvider({
           isDraggingRef.current = false;
           const seq = dragBufferRef.current;
           dragBufferRef.current = '';
+          logDragDrop(false, seq, DRAG_COMPLETION_TIMEOUT_MS);
           if (seq) {
             broadcast({ ...key, name: '', paste: true, sequence: seq });
           }
         }, DRAG_COMPLETION_TIMEOUT_MS);
 
+        logDragDrop(true, dragBufferRef.current, DRAG_COMPLETION_TIMEOUT_MS);
         return;
       }
 
@@ -646,6 +761,10 @@ export function KeypressProvider({
       if (key.name === 'return' && key.sequence === `${ESC}\r`) {
         key.meta = true;
       }
+
+      // Log all keypress events for debugging
+      logKeypress(key.sequence, isPaste, key.name, key.ctrl, key.meta);
+
       broadcast({ ...key, paste: isPaste });
     };
 
@@ -763,6 +882,26 @@ export function KeypressProvider({
         });
         isDraggingRef.current = false;
         dragBufferRef.current = '';
+      }
+
+      // Flush any pending rapid input data
+      if (rapidInputTimerRef.current) {
+        clearTimeout(rapidInputTimerRef.current);
+        rapidInputTimerRef.current = null;
+      }
+      if (rapidInputBufferRef.current) {
+        const seq = rapidInputBufferRef.current;
+        const normalized = seq.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const isPasteLikely = normalized.length > 1;
+        broadcast({
+          name: '',
+          ctrl: false,
+          meta: false,
+          shift: false,
+          paste: isPasteLikely,
+          sequence: normalized,
+        });
+        rapidInputBufferRef.current = '';
       }
     };
   }, [

@@ -38,6 +38,11 @@ import * as path from 'node:path';
 import { SCREEN_READER_USER_PREFIX } from '../textConstants.js';
 import { useShellFocusState } from '../contexts/ShellFocusContext.js';
 import { useUIState } from '../contexts/UIStateContext.js';
+import {
+  logUnsafePasteWindow,
+  logPasteProtection,
+  logGeneral,
+} from '../utils/pasteDebugLogger.js';
 
 /**
  * Returns if the terminal can be trusted to handle paste events atomically
@@ -318,26 +323,28 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       if (key.paste) {
         // Record paste time to prevent accidental auto-submission
         if (!isTerminalPasteTrusted(kittyProtocol.supported)) {
-          setRecentUnsafePasteTime(Date.now());
+          const now = Date.now();
+          setRecentUnsafePasteTime(now);
+
+          // Log paste protection window
+          logUnsafePasteWindow(now, 150);
 
           // Clear any existing paste timeout
           if (pasteTimeoutRef.current) {
             clearTimeout(pasteTimeoutRef.current);
           }
 
-          // Clear the paste protection after a very short delay to prevent
-          // false positives.
-          // Due to how we use a reducer for text buffer state updates, it is
-          // reasonable to expect that key events that are really part of the
-          // same paste will be processed in the same event loop tick. 40ms
-          // is chosen arbitrarily as it is faster than a typical human
-          // could go from pressing paste to pressing enter. The fastest typists
-          // can type at 200 words per minute which roughly translates to 50ms
-          // per letter.
+          // Extended paste protection window for Windows
+          // Increased from 40ms to 100ms, then to 150ms to better handle Windows terminal
+          // paste behavior where content may be split into multiple events.
+          // Windows terminals often send paste content as multiple keyboard
+          // events, especially with CRLF line endings. Multi-line pastes need
+          // more time (150ms) to ensure all events are captured as one paste operation.
           pasteTimeoutRef.current = setTimeout(() => {
             setRecentUnsafePasteTime(null);
             pasteTimeoutRef.current = null;
-          }, 40);
+            logGeneral('Paste protection window cleared');
+          }, 150);
         }
         // Ensure we never accidentally interpret paste as regular input.
         buffer.handleInput(key);
@@ -614,6 +621,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             // This has the added benefit that in the worst case at least users
             // get some feedback that their keypress was handled rather than
             // wondering why it was completey ignored.
+            const timeSincePaste = Date.now() - recentUnsafePasteTime;
+            logPasteProtection(
+              'Submit blocked due to recent paste',
+              timeSincePaste,
+            );
             buffer.newline();
             return;
           }
