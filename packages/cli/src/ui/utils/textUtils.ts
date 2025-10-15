@@ -8,7 +8,6 @@ import stripAnsi from 'strip-ansi';
 import ansiRegex from 'ansi-regex';
 import { stripVTControlCharacters } from 'node:util';
 import stringWidth from 'string-width';
-import { logNewlineNormalization } from './pasteDebugLogger.js';
 
 /**
  * Calculates the maximum width of a multi-line ASCII art string.
@@ -92,11 +91,10 @@ export function cpSlice(str: string, start: number, end?: number): string {
  * - CR/LF (0x0D/0x0A) - needed for line breaks
  */
 export function stripUnsafeCharacters(str: string): string {
-  const originalStr = str;
   const strippedAnsi = stripAnsi(str);
   const strippedVT = stripVTControlCharacters(strippedAnsi);
 
-  const result = toCodePoints(strippedVT)
+  return toCodePoints(strippedVT)
     .filter((char) => {
       const code = char.codePointAt(0);
       if (code === undefined) return false;
@@ -118,16 +116,6 @@ export function stripUnsafeCharacters(str: string): string {
       return true;
     })
     .join('');
-
-  // Log if the string contained newlines (likely from paste operation)
-  if (
-    originalStr !== result &&
-    (/[\r\n]/.test(originalStr) || /[\r\n]/.test(result))
-  ) {
-    logNewlineNormalization(originalStr, result);
-  }
-
-  return result;
 }
 
 // String width caching for performance optimization

@@ -19,11 +19,6 @@ import {
 } from '../../utils/textUtils.js';
 import type { VimAction } from './vim-buffer-actions.js';
 import { handleVimAction } from './vim-buffer-actions.js';
-import {
-  logBufferInsert,
-  logBufferState,
-  logGeneral,
-} from '../../utils/pasteDebugLogger.js';
 
 export type Direction =
   | 'left'
@@ -990,17 +985,10 @@ function textBufferReducerLogic(
       let newCursorCol = nextState.cursorCol;
 
       const currentLine = (r: number) => newLines[r] ?? '';
-      const beforeLength = newLines.join('\n').length;
 
-      // Normalize line endings early, before stripUnsafeCharacters
-      const normalizedPayload = action.payload
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n');
-      const str = stripUnsafeCharacters(normalizedPayload);
-
-      // Log the insert operation
-      logBufferInsert(beforeLength, beforeLength + str.length, str, false);
-
+      const str = stripUnsafeCharacters(
+        action.payload.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+      );
       const parts = str.split('\n');
       const lineContent = currentLine(newCursorRow);
       const before = cpSlice(lineContent, 0, newCursorCol);
@@ -1023,18 +1011,13 @@ function textBufferReducerLogic(
         newCursorCol = cpLen(before) + cpLen(parts[0]);
       }
 
-      const finalState = {
+      return {
         ...nextState,
         lines: newLines,
         cursorRow: newCursorRow,
         cursorCol: newCursorCol,
         preferredCol: null,
       };
-
-      // Log final buffer state after insert
-      logBufferState(newLines.join('\n'), newCursorRow, newCursorCol);
-
-      return finalState;
     }
 
     case 'backspace': {
@@ -1626,14 +1609,6 @@ export function useTextBuffer({
 
   const insert = useCallback(
     (ch: string, { paste = false }: { paste?: boolean } = {}): void => {
-      // Normalize line endings early if this is a paste operation
-      if (paste && ch.length > 1) {
-        logGeneral('Insert called with paste=true', {
-          length: ch.length,
-          hasNewlines: /[\n\r]/.test(ch),
-        });
-      }
-
       if (/[\n\r]/.test(ch)) {
         dispatch({ type: 'insert', payload: ch });
         return;
