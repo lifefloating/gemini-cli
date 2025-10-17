@@ -928,6 +928,224 @@ describe('SettingsDialog', () => {
     });
   });
 
+  describe('Race Condition Regression Tests', () => {
+    it('should not reset sibling settings when toggling a nested setting multiple times', async () => {
+      vi.mocked(saveModifiedSettings).mockClear();
+
+      const FAKE_SCHEMA: SettingsSchemaType = {
+        tools: {
+          type: 'object',
+          label: 'Tools',
+          category: 'Tools',
+          requiresRestart: false,
+          default: {},
+          description: 'Tool settings.',
+          showInDialog: false,
+          properties: {
+            shell: {
+              type: 'object',
+              label: 'Shell',
+              category: 'Tools',
+              requiresRestart: false,
+              default: {},
+              description: 'Shell tool settings.',
+              showInDialog: false,
+              properties: {
+                showColor: {
+                  type: 'boolean',
+                  label: 'Show Color',
+                  category: 'Tools',
+                  requiresRestart: false,
+                  default: false,
+                  description: 'Show color in shell output.',
+                  showInDialog: true,
+                },
+                enableInteractiveShell: {
+                  type: 'boolean',
+                  label: 'Enable Interactive Shell',
+                  category: 'Tools',
+                  requiresRestart: true,
+                  default: true,
+                  description: 'Enable interactive shell mode.',
+                  showInDialog: true,
+                },
+              },
+            },
+          },
+        },
+      } as unknown as SettingsSchemaType;
+
+      vi.mocked(getSettingsSchema).mockReturnValue(FAKE_SCHEMA);
+
+      const settings = createMockSettings({
+        tools: {
+          shell: {
+            showColor: false,
+            enableInteractiveShell: true,
+          },
+        },
+      });
+
+      const onSelect = vi.fn();
+      const component = (
+        <KeypressProvider kittyProtocolEnabled={false}>
+          <SettingsDialog settings={settings} onSelect={onSelect} />
+        </KeypressProvider>
+      );
+
+      const { stdin, unmount } = render(component);
+
+      await wait();
+
+      // Toggle showColor 5 times to trigger race condition
+      for (let i = 0; i < 5; i++) {
+        act(() => {
+          stdin.write(TerminalKeys.ENTER as string);
+        });
+        await wait(50);
+      }
+
+      await waitFor(() => {
+        expect(
+          vi.mocked(saveModifiedSettings).mock.calls.length,
+        ).toBeGreaterThan(0);
+      });
+
+      // Verify sibling settings are preserved
+      const calls = vi.mocked(saveModifiedSettings).mock.calls;
+      calls.forEach((call) => {
+        const [modifiedKeys, pendingSettings] = call;
+
+        if (modifiedKeys.has('tools.shell.showColor')) {
+          expect(pendingSettings.tools?.shell?.enableInteractiveShell).toBe(
+            true,
+          );
+          expect(modifiedKeys.has('tools.shell.enableInteractiveShell')).toBe(
+            false,
+          );
+        }
+      });
+
+      expect(calls.length).toBeGreaterThan(0);
+
+      unmount();
+    });
+
+    it('should preserve multiple sibling settings in nested objects during rapid toggles', async () => {
+      vi.mocked(saveModifiedSettings).mockClear();
+
+      const FAKE_SCHEMA: SettingsSchemaType = {
+        tools: {
+          type: 'object',
+          label: 'Tools',
+          category: 'Tools',
+          requiresRestart: false,
+          default: {},
+          description: 'Tool settings.',
+          showInDialog: false,
+          properties: {
+            shell: {
+              type: 'object',
+              label: 'Shell',
+              category: 'Tools',
+              requiresRestart: false,
+              default: {},
+              description: 'Shell tool settings.',
+              showInDialog: false,
+              properties: {
+                showColor: {
+                  type: 'boolean',
+                  label: 'Show Color',
+                  category: 'Tools',
+                  requiresRestart: false,
+                  default: false,
+                  description: 'Show color in shell output.',
+                  showInDialog: true,
+                },
+                enableInteractiveShell: {
+                  type: 'boolean',
+                  label: 'Enable Interactive Shell',
+                  category: 'Tools',
+                  requiresRestart: true,
+                  default: true,
+                  description: 'Enable interactive shell mode.',
+                  showInDialog: true,
+                },
+                pager: {
+                  type: 'string',
+                  label: 'Pager',
+                  category: 'Tools',
+                  requiresRestart: false,
+                  default: 'cat',
+                  description: 'The pager command to use for shell output.',
+                  showInDialog: true,
+                },
+              },
+            },
+          },
+        },
+      } as unknown as SettingsSchemaType;
+
+      vi.mocked(getSettingsSchema).mockReturnValue(FAKE_SCHEMA);
+
+      const settings = createMockSettings({
+        tools: {
+          shell: {
+            showColor: false,
+            enableInteractiveShell: true,
+            pager: 'less',
+          },
+        },
+      });
+
+      const onSelect = vi.fn();
+      const component = (
+        <KeypressProvider kittyProtocolEnabled={false}>
+          <SettingsDialog settings={settings} onSelect={onSelect} />
+        </KeypressProvider>
+      );
+
+      const { stdin, unmount } = render(component);
+
+      await wait();
+
+      // Rapid toggles
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          stdin.write(TerminalKeys.ENTER as string);
+        });
+        await wait(30);
+      }
+
+      await waitFor(() => {
+        expect(
+          vi.mocked(saveModifiedSettings).mock.calls.length,
+        ).toBeGreaterThan(0);
+      });
+
+      // Verify all siblings preserved
+      const calls = vi.mocked(saveModifiedSettings).mock.calls;
+      calls.forEach((call) => {
+        const [modifiedKeys, pendingSettings] = call;
+
+        if (modifiedKeys.has('tools.shell.showColor')) {
+          const shellSettings = pendingSettings.tools?.shell as
+            | Record<string, unknown>
+            | undefined;
+          expect(shellSettings?.['enableInteractiveShell']).toBe(true);
+          expect(shellSettings?.['pager']).toBe('less');
+          expect(modifiedKeys.size).toBe(1);
+          expect(modifiedKeys.has('tools.shell.enableInteractiveShell')).toBe(
+            false,
+          );
+          expect(modifiedKeys.has('tools.shell.pager')).toBe(false);
+        }
+      });
+
+      unmount();
+    });
+  });
+
   describe('Keyboard Shortcuts Edge Cases', () => {
     it('should handle rapid key presses gracefully', async () => {
       const settings = createMockSettings();
