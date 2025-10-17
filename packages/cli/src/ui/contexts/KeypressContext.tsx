@@ -204,19 +204,11 @@ export function KeypressProvider({
       setRawMode(true);
     }
 
-    // Windows-specific: Ensure stdin is properly configured
+    // Windows-specific: ensure stdin is in raw mode without altering terminal echo/wrap
     if (isWindows && stdin.isTTY) {
-      // Disable echo on Windows to prevent paste data from appearing in terminal
       logPasteDebug(`Windows TTY detected, ensuring raw mode is set`);
       try {
         stdin.setRawMode?.(true);
-        // On Windows, we need to ensure echo is disabled
-        if (process.stdout.isTTY) {
-          // Disable echo and line editing
-          process.stdout.write('\x1b[?25l'); // Hide cursor
-          process.stdout.write('\x1b[?7l'); // Disable line wrap
-          process.stdout.write('\x1b[?25h'); // Show cursor
-        }
       } catch (e) {
         logPasteDebug(`Failed to set raw mode on Windows: ${e}`);
       }
@@ -247,6 +239,7 @@ export function KeypressProvider({
     let windowsPasteBuffer = '';
     let windowsPasteTimer: NodeJS.Timeout | null = null;
     let lastWindowsInputTime = Date.now();
+    let windowsPasteActive = false;
     const WINDOWS_PASTE_TIMEOUT = 50; // ms to wait for more input
 
     // Parse a single complete kitty sequence from the start (prefix) of the
@@ -790,25 +783,26 @@ export function KeypressProvider({
             data,
           );
 
-          // If we have a paste buffer, flush it immediately before processing the special key
+          // Flush Windows paste buffer if the user pressed a special key while buffering
           if (windowsPasteTimer) {
             clearTimeout(windowsPasteTimer);
-            if (windowsPasteBuffer.length > 0) {
-              logPasteDebug(
-                `Special key detected, flushing Windows paste buffer`,
-              );
-              broadcast({
-                name: '',
-                ctrl: false,
-                meta: false,
-                shift: false,
-                paste: true,
-                sequence: windowsPasteBuffer,
-              });
-            }
-            windowsPasteBuffer = '';
             windowsPasteTimer = null;
           }
+          if (windowsPasteActive && windowsPasteBuffer.length > 0) {
+            logPasteDebug(
+              `Special key detected, flushing Windows paste buffer`,
+            );
+            broadcast({
+              name: '',
+              ctrl: false,
+              meta: false,
+              shift: false,
+              paste: true,
+              sequence: windowsPasteBuffer,
+            });
+          }
+          windowsPasteBuffer = '';
+          windowsPasteActive = false;
 
           // Also flush any partial buffer before processing special key
           if (partialDataBuffer.length > 0) {
@@ -828,8 +822,8 @@ export function KeypressProvider({
           // Check if this looks like paste (rapid multi-character input)
           // Lower threshold for initial detection to catch paste start
           const looksLikePaste =
-            dataStr.length > 3 ||
-            (windowsPasteBuffer && timeSinceLastWindowsInput < 200) ||
+            (!windowsPasteActive && dataStr.length > 3) ||
+            (windowsPasteActive && timeSinceLastWindowsInput < 200) ||
             (dataStr.includes('\r') && dataStr.length > 10);
 
           if (looksLikePaste) {
@@ -845,6 +839,7 @@ export function KeypressProvider({
             // Add to buffer
             windowsPasteBuffer += dataStr;
             lastWindowsInputTime = currentTime;
+            windowsPasteActive = true;
 
             // Set timer to flush buffer as paste
             windowsPasteTimer = setTimeout(() => {
@@ -866,6 +861,7 @@ export function KeypressProvider({
 
                 windowsPasteBuffer = '';
                 windowsPasteTimer = null;
+                windowsPasteActive = false;
               }
             }, WINDOWS_PASTE_TIMEOUT);
 
@@ -880,7 +876,6 @@ export function KeypressProvider({
             clearTimeout(windowsPasteTimer);
 
             if (windowsPasteBuffer.length > 0) {
-              // Directly broadcast the buffered paste content
               logPasteDebug(`Early flush: broadcasting Windows paste content`);
               broadcast({
                 name: '',
@@ -894,6 +889,7 @@ export function KeypressProvider({
 
             windowsPasteBuffer = '';
             windowsPasteTimer = null;
+            windowsPasteActive = false;
             lastWindowsInputTime = currentTime;
 
             // Continue processing this single character normally
@@ -1030,9 +1026,21 @@ export function KeypressProvider({
             'Found paste-start marker, triggering paste-start event',
           );
           handleKeypress(undefined, createPasteKeyEvent('paste-start'));
+          windowsPasteActive = true;
+          windowsPasteBuffer = '';
+          if (windowsPasteTimer) {
+            clearTimeout(windowsPasteTimer);
+            windowsPasteTimer = null;
+          }
         } else if (isSuffixNext) {
           logPasteDebug('Found paste-end marker, triggering paste-end event');
           handleKeypress(undefined, createPasteKeyEvent('paste-end'));
+          windowsPasteActive = false;
+          windowsPasteBuffer = '';
+          if (windowsPasteTimer) {
+            clearTimeout(windowsPasteTimer);
+            windowsPasteTimer = null;
+          }
         }
 
         pos = nextMarkerPos + markerLength;
@@ -1096,20 +1104,9 @@ export function KeypressProvider({
       if (windowsPasteTimer) {
         clearTimeout(windowsPasteTimer);
         windowsPasteTimer = null;
-        if (windowsPasteBuffer) {
-          // Flush any pending Windows paste buffer
-          logPasteDebug('Cleanup: flushing Windows paste buffer');
-          broadcast({
-            name: '',
-            ctrl: false,
-            meta: false,
-            shift: false,
-            paste: true,
-            sequence: windowsPasteBuffer,
-          });
-          windowsPasteBuffer = '';
-        }
       }
+      windowsPasteBuffer = '';
+      windowsPasteActive = false;
 
       // Clean up debug log
       if (pasteDebugStream) {
