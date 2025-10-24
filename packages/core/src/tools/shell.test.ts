@@ -44,6 +44,7 @@ import { ToolErrorType } from './tool-error.js';
 import { ToolConfirmationOutcome } from './tools.js';
 import { OUTPUT_UPDATE_INTERVAL_MS } from './shell.js';
 import { createMockWorkspaceContext } from '../test-utils/mockWorkspaceContext.js';
+import { SHELL_TOOL_NAME } from './tool-names.js';
 
 const originalComSpec = process.env['ComSpec'];
 const itWindowsOnly = process.platform === 'win32' ? it : it.skip;
@@ -306,7 +307,7 @@ describe('ShellTool', () => {
 
     it('should summarize output when configured', async () => {
       (mockConfig.getSummarizeToolOutputConfig as Mock).mockReturnValue({
-        [shellTool.name]: { tokenBudget: 1000 },
+        [SHELL_TOOL_NAME]: { tokenBudget: 1000 },
       });
       vi.mocked(summarizer.summarizeToolOutput).mockResolvedValue(
         'summarized output',
@@ -478,6 +479,18 @@ describe('ShellTool', () => {
         await expect(
           invocation.shouldConfirmExecute(new AbortController().signal),
         ).rejects.toThrow('wc');
+      });
+
+      it('should require all segments of a chained command to be allowlisted', async () => {
+        (mockConfig.getAllowedTools as Mock).mockReturnValue([
+          'ShellTool(echo)',
+        ]);
+        const invocation = shellTool.build({ command: 'echo "foo" && ls -l' });
+        await expect(
+          invocation.shouldConfirmExecute(new AbortController().signal),
+        ).rejects.toThrow(
+          'Command "echo "foo" && ls -l" is not in the list of allowed tools for non-interactive mode.',
+        );
       });
     });
   });

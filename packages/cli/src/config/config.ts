@@ -29,16 +29,17 @@ import {
   DEFAULT_GEMINI_EMBEDDING_MODEL,
   DEFAULT_MEMORY_FILE_FILTERING_OPTIONS,
   FileDiscoveryService,
-  ShellTool,
-  EditTool,
   WRITE_FILE_TOOL_NAME,
   SHELL_TOOL_NAMES,
+  SHELL_TOOL_NAME,
   resolveTelemetrySettings,
   FatalConfigError,
+  getPty,
+  EDIT_TOOL_NAME,
+  debugLogger,
 } from '@google/gemini-cli-core';
 import type { Settings } from './settings.js';
 
-import { annotateActiveExtensions } from './extension.js';
 import { getCliVersion } from '../utils/version.js';
 import { loadSandboxConfig } from './sandboxConfig.js';
 import { resolvePath } from '../utils/resolvePath.js';
@@ -46,42 +47,28 @@ import { appEvents } from '../utils/events.js';
 
 import { isWorkspaceTrusted } from './trustedFolders.js';
 import { createPolicyEngineConfig } from './policy.js';
-import type { ExtensionEnablementManager } from './extensions/extensionEnablement.js';
-
-// Simple console logger for now - replace with actual logger if available
-const logger = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  debug: (...args: any[]) => console.debug('[DEBUG]', ...args),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  warn: (...args: any[]) => console.warn('[WARN]', ...args),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  error: (...args: any[]) => console.error('[ERROR]', ...args),
-};
 
 export interface CliArgs {
   query: string | undefined;
   model: string | undefined;
   sandbox: boolean | string | undefined;
-  sandboxImage: string | undefined;
   debug: boolean | undefined;
   prompt: string | undefined;
   promptInteractive: string | undefined;
 
-  showMemoryUsage: boolean | undefined;
   yolo: boolean | undefined;
   approvalMode: string | undefined;
-  checkpointing: boolean | undefined;
   allowedMcpServerNames: string[] | undefined;
   allowedTools: string[] | undefined;
   experimentalAcp: boolean | undefined;
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
-  proxy: string | undefined;
   includeDirectories: string[] | undefined;
   screenReader: boolean | undefined;
   useSmartEdit: boolean | undefined;
   useWriteTodos: boolean | undefined;
   outputFormat: string | undefined;
+  fakeResponses: string | undefined;
 }
 
 export async function parseArguments(settings: Settings): Promise<CliArgs> {
@@ -99,16 +86,6 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
       description: 'Run in debug mode?',
       default: false,
     })
-    .option('proxy', {
-      type: 'string',
-      nargs: 1,
-      description:
-        'Proxy for gemini client, like schema://user:password@host:port',
-    })
-    .deprecateOption(
-      'proxy',
-      'Use the "proxy" setting in settings.json instead. This flag will be removed in a future version.',
-    )
     .command('$0 [query..]', 'Launch Gemini CLI', (yargsInstance) =>
       yargsInstance
         .positional('query', {
@@ -139,17 +116,7 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           type: 'boolean',
           description: 'Run in sandbox?',
         })
-        .option('sandbox-image', {
-          type: 'string',
-          nargs: 1,
-          description: 'Sandbox image URI.',
-        })
 
-        .option('show-memory-usage', {
-          type: 'boolean',
-          description: 'Show memory usage in status bar',
-          default: false,
-        })
         .option('yolo', {
           alias: 'y',
           type: 'boolean',
@@ -163,12 +130,6 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           choices: ['default', 'auto_edit', 'yolo'],
           description:
             'Set the approval mode: default (prompt for approval), auto_edit (auto-approve edit tools), yolo (auto-approve all tools)',
-        })
-        .option('checkpointing', {
-          alias: 'c',
-          type: 'boolean',
-          description: 'Enables checkpointing of file edits',
-          default: false,
         })
         .option('experimental-acp', {
           type: 'boolean',
@@ -233,26 +194,17 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           description: 'The format of the CLI output.',
           choices: ['text', 'json', 'stream-json'],
         })
-        .deprecateOption(
-          'show-memory-usage',
-          'Use the "ui.showMemoryUsage" setting in settings.json instead. This flag will be removed in a future version.',
-        )
-        .deprecateOption(
-          'sandbox-image',
-          'Use the "tools.sandbox" setting in settings.json instead. This flag will be removed in a future version.',
-        )
-        .deprecateOption(
-          'checkpointing',
-          'Use the "general.checkpointing.enabled" setting in settings.json instead. This flag will be removed in a future version.',
-        )
-
+        .option('fake-responses', {
+          type: 'string',
+          description: 'Path to a file with fake model responses for testing.',
+        })
         .deprecateOption(
           'prompt',
           'Use the positional prompt instead. This flag will be removed in a future version.',
         )
         // Ensure validation flows through .fail() for clean UX
         .fail((msg, err, yargs) => {
-          console.error(msg || err?.message || 'Unknown error');
+          debugLogger.error(msg || err?.message || 'Unknown error');
           yargs.showHelp();
           process.exit(1);
         })
@@ -340,7 +292,7 @@ export async function loadHierarchicalGeminiMemory(
   debugMode: boolean,
   fileService: FileDiscoveryService,
   settings: Settings,
-  extensionContextFilePaths: string[] = [],
+  extensions: GeminiCLIExtension[],
   folderTrust: boolean,
   memoryImportFormat: 'flat' | 'tree' = 'tree',
   fileFilteringOptions?: FileFilteringOptions,
@@ -355,7 +307,7 @@ export async function loadHierarchicalGeminiMemory(
   const effectiveCwd = isHomeDirectory ? '' : currentWorkingDirectory;
 
   if (debugMode) {
-    logger.debug(
+    debugLogger.debug(
       `CLI: Delegating hierarchical memory load to server for CWD: ${currentWorkingDirectory} (memoryImportFormat: ${memoryImportFormat})`,
     );
   }
@@ -366,7 +318,7 @@ export async function loadHierarchicalGeminiMemory(
     includeDirectoriesToReadGemini,
     debugMode,
     fileService,
-    extensionContextFilePaths,
+    extensions,
     folderTrust,
     memoryImportFormat,
     fileFilteringOptions,
@@ -394,7 +346,7 @@ function createToolExclusionFilter(
   allowedToolsSet: Set<string>,
 ) {
   return (tool: string): boolean => {
-    if (tool === ShellTool.Name) {
+    if (tool === SHELL_TOOL_NAME) {
       // If any of the allowed tools is ShellTool (even with subcommands), don't exclude it.
       return !allowedTools.some((allowed) =>
         SHELL_TOOL_NAMES.some((shellName) => allowed.startsWith(shellName)),
@@ -415,8 +367,7 @@ export function isDebugMode(argv: CliArgs): boolean {
 
 export async function loadCliConfig(
   settings: Settings,
-  extensions: GeminiCLIExtension[],
-  extensionEnablementManager: ExtensionEnablementManager,
+  allExtensions: GeminiCLIExtension[],
   sessionId: string,
   argv: CliArgs,
   cwd: string = process.cwd(),
@@ -430,16 +381,6 @@ export async function loadCliConfig(
   const folderTrust = settings.security?.folderTrust?.enabled ?? false;
   const trustedFolder = isWorkspaceTrusted(settings)?.isTrusted ?? true;
 
-  const allExtensions = annotateActiveExtensions(
-    extensions,
-    cwd,
-    extensionEnablementManager,
-  );
-
-  const activeExtensions = extensions.filter(
-    (_, i) => allExtensions[i].isActive,
-  );
-
   // Set the context filename in the server's memoryTool module BEFORE loading memory
   // TODO(b/343434939): This is a bit of a hack. The contextFileName should ideally be passed
   // directly to the Config constructor in core, and have core handle setGeminiMdFilename.
@@ -450,10 +391,6 @@ export async function loadCliConfig(
     // Reset to default if not provided in settings.
     setServerGeminiMdFilename(getCurrentGeminiMdFilename());
   }
-
-  const extensionContextFilePaths = activeExtensions.flatMap(
-    (e) => e.contextFiles,
-  );
 
   const fileService = new FileDiscoveryService(cwd);
 
@@ -476,13 +413,13 @@ export async function loadCliConfig(
       debugMode,
       fileService,
       settings,
-      extensionContextFilePaths,
+      allExtensions,
       trustedFolder,
       memoryImportFormat,
       fileFiltering,
     );
 
-  let mcpServers = mergeMcpServers(settings, activeExtensions);
+  let mcpServers = mergeMcpServers(settings, allExtensions);
   const question = argv.promptInteractive || argv.prompt || '';
 
   // Determine approval mode with backward compatibility
@@ -510,9 +447,24 @@ export async function loadCliConfig(
       argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT;
   }
 
+  // Override approval mode if disableYoloMode is set.
+  if (settings.security?.disableYoloMode) {
+    if (approvalMode === ApprovalMode.YOLO) {
+      debugLogger.error('YOLO mode is disabled by the "disableYolo" setting.');
+      throw new FatalConfigError(
+        'Cannot start in YOLO mode when it is disabled by settings',
+      );
+    }
+    approvalMode = ApprovalMode.DEFAULT;
+  } else if (approvalMode === ApprovalMode.YOLO) {
+    debugLogger.warn(
+      'YOLO mode is enabled. All tool calls will be automatically approved.',
+    );
+  }
+
   // Force approval mode to default if the folder is not trusted.
   if (!trustedFolder && approvalMode !== ApprovalMode.DEFAULT) {
-    logger.warn(
+    debugLogger.warn(
       `Approval mode overridden to "default" because the current folder is not trusted.`,
     );
     approvalMode = ApprovalMode.DEFAULT;
@@ -547,11 +499,11 @@ export async function loadCliConfig(
   const extraExcludes: string[] = [];
   if (!interactive && !argv.experimentalAcp) {
     const defaultExcludes = [
-      ShellTool.Name,
-      EditTool.Name,
+      SHELL_TOOL_NAME,
+      EDIT_TOOL_NAME,
       WRITE_FILE_TOOL_NAME,
     ];
-    const autoEditExcludes = [ShellTool.Name];
+    const autoEditExcludes = [SHELL_TOOL_NAME];
 
     const toolExclusionFilter = createToolExclusionFilter(
       allowedTools,
@@ -578,7 +530,7 @@ export async function loadCliConfig(
 
   const excludeTools = mergeExcludeTools(
     settings,
-    activeExtensions,
+    allExtensions,
     extraExcludes.length > 0 ? extraExcludes : undefined,
   );
   const blockedMcpServers: Array<{ name: string; extensionName: string }> = [];
@@ -625,6 +577,9 @@ export async function loadCliConfig(
     argv.screenReader !== undefined
       ? argv.screenReader
       : (settings.ui?.accessibility?.screenReader ?? false);
+
+  const ptyInfo = await getPty();
+
   return new Config({
     sessionId,
     embeddingModel: DEFAULT_GEMINI_EMBEDDING_MODEL,
@@ -648,8 +603,8 @@ export async function loadCliConfig(
     geminiMdFileCount: fileCount,
     geminiMdFilePaths: filePaths,
     approvalMode,
-    showMemoryUsage:
-      argv.showMemoryUsage || settings.ui?.showMemoryUsage || false,
+    disableYoloMode: settings.security?.disableYoloMode,
+    showMemoryUsage: settings.ui?.showMemoryUsage || false,
     accessibility: {
       ...settings.ui?.accessibility,
       screenReader,
@@ -657,10 +612,8 @@ export async function loadCliConfig(
     telemetry: telemetrySettings,
     usageStatisticsEnabled: settings.privacy?.usageStatisticsEnabled ?? true,
     fileFiltering,
-    checkpointing:
-      argv.checkpointing || settings.general?.checkpointing?.enabled,
+    checkpointing: settings.general?.checkpointing?.enabled,
     proxy:
-      argv.proxy ||
       process.env['HTTPS_PROXY'] ||
       process.env['https_proxy'] ||
       process.env['HTTP_PROXY'] ||
@@ -669,10 +622,10 @@ export async function loadCliConfig(
     fileDiscoveryService: fileService,
     bugCommand: settings.advanced?.bugCommand,
     model: resolvedModel,
-    extensionContextFilePaths,
     maxSessionTurns: settings.model?.maxSessionTurns ?? -1,
     experimentalZedIntegration: argv.experimentalAcp || false,
     listExtensions: argv.listExtensions || false,
+    enabledExtensions: argv.extensions,
     extensions: allExtensions,
     blockedMcpServers,
     noBrowser: !!process.env['NO_BROWSER'],
@@ -701,7 +654,9 @@ export async function loadCliConfig(
       settings.tools?.enableMessageBusIntegration ?? false,
     codebaseInvestigatorSettings:
       settings.experimental?.codebaseInvestigatorSettings,
+    fakeResponses: argv.fakeResponses,
     retryFetchErrors: settings.general?.retryFetchErrors ?? false,
+    ptyInfo: ptyInfo?.name,
   });
 }
 
@@ -718,7 +673,7 @@ function allowedMcpServers(
         if (!isAllowed) {
           blockedMcpServers.push({
             name: key,
-            extensionName: server.extensionName || '',
+            extensionName: server.extension?.name || '',
           });
         }
         return isAllowed;
@@ -728,7 +683,7 @@ function allowedMcpServers(
     blockedMcpServers.push(
       ...Object.entries(mcpServers).map(([key, server]) => ({
         name: key,
-        extensionName: server.extensionName || '',
+        extensionName: server.extension?.name || '',
       })),
     );
     mcpServers = {};
@@ -739,16 +694,19 @@ function allowedMcpServers(
 function mergeMcpServers(settings: Settings, extensions: GeminiCLIExtension[]) {
   const mcpServers = { ...(settings.mcpServers || {}) };
   for (const extension of extensions) {
+    if (!extension.isActive) {
+      continue;
+    }
     Object.entries(extension.mcpServers || {}).forEach(([key, server]) => {
       if (mcpServers[key]) {
-        logger.warn(
+        debugLogger.warn(
           `Skipping extension MCP config for server with key "${key}" as it already exists.`,
         );
         return;
       }
       mcpServers[key] = {
         ...server,
-        extensionName: extension.name,
+        extension,
       };
     });
   }
@@ -765,6 +723,9 @@ function mergeExcludeTools(
     ...(extraExcludes || []),
   ]);
   for (const extension of extensions) {
+    if (!extension.isActive) {
+      continue;
+    }
     for (const tool of extension.excludeTools || []) {
       allExcludeTools.add(tool);
     }

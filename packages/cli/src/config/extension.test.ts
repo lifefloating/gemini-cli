@@ -4,37 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { vi } from 'vitest';
+import { vi, type MockedFunction } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  EXTENSIONS_CONFIG_FILENAME,
-  ExtensionStorage,
-  INSTALL_METADATA_FILENAME,
-  INSTALL_WARNING_MESSAGE,
-  annotateActiveExtensions,
-  disableExtension,
-  enableExtension,
-  installOrUpdateExtension,
-  loadExtension,
-  loadExtensionConfig,
-  loadExtensions,
-  performWorkspaceExtensionMigration,
-  uninstallExtension,
-} from './extension.js';
-import {
-  GEMINI_DIR,
   type GeminiCLIExtension,
   ExtensionUninstallEvent,
   ExtensionDisableEvent,
   ExtensionEnableEvent,
 } from '@google/gemini-cli-core';
-import { SettingScope } from './settings.js';
+import { loadSettings, SettingScope } from './settings.js';
 import { isWorkspaceTrusted } from './trustedFolders.js';
 import { createExtension } from '../test-utils/createExtension.js';
 import { ExtensionEnablementManager } from './extensions/extensionEnablement.js';
 import { join } from 'node:path';
+import {
+  EXTENSIONS_CONFIG_FILENAME,
+  EXTENSIONS_DIRECTORY_NAME,
+  INSTALL_METADATA_FILENAME,
+} from './extensions/variables.js';
+import { hashValue, ExtensionManager } from './extension-manager.js';
+import { ExtensionStorage } from './extensions/storage.js';
+import { INSTALL_WARNING_MESSAGE } from './extensions/consent.js';
+import type { ExtensionSetting } from './extensions/extensionSettings.js';
 
 const mockGit = {
   clone: vi.fn(),
@@ -112,12 +105,15 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-const EXTENSIONS_DIRECTORY_NAME = path.join(GEMINI_DIR, 'extensions');
-
 describe('extension tests', () => {
   let tempHomeDir: string;
   let tempWorkspaceDir: string;
   let userExtensionsDir: string;
+  let extensionManager: ExtensionManager;
+  let mockRequestConsent: MockedFunction<(consent: string) => Promise<boolean>>;
+  let mockPromptForSettings: MockedFunction<
+    (setting: ExtensionSetting) => Promise<string>
+  >;
 
   beforeEach(() => {
     tempHomeDir = fs.mkdtempSync(
@@ -127,14 +123,23 @@ describe('extension tests', () => {
       path.join(tempHomeDir, 'gemini-cli-test-workspace-'),
     );
     userExtensionsDir = path.join(tempHomeDir, EXTENSIONS_DIRECTORY_NAME);
+    mockRequestConsent = vi.fn();
+    mockRequestConsent.mockResolvedValue(true);
+    mockPromptForSettings = vi.fn();
+    mockPromptForSettings.mockResolvedValue('');
     fs.mkdirSync(userExtensionsDir, { recursive: true });
-
     vi.mocked(os.homedir).mockReturnValue(tempHomeDir);
     vi.mocked(isWorkspaceTrusted).mockReturnValue({
       isTrusted: true,
       source: undefined,
     });
     vi.spyOn(process, 'cwd').mockReturnValue(tempWorkspaceDir);
+    extensionManager = new ExtensionManager({
+      workspaceDir: tempWorkspaceDir,
+      requestConsent: mockRequestConsent,
+      requestSetting: mockPromptForSettings,
+      loadedSettings: loadSettings(tempWorkspaceDir),
+    });
   });
 
   afterEach(() => {
@@ -154,9 +159,7 @@ describe('extension tests', () => {
         version: '1.0.0',
       });
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
       expect(extensions).toHaveLength(1);
       expect(extensions[0].path).toBe(extensionDir);
       expect(extensions[0].name).toBe('test-extension');
@@ -175,9 +178,7 @@ describe('extension tests', () => {
         version: '2.0.0',
       });
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
 
       expect(extensions).toHaveLength(2);
       const ext1 = extensions.find((e) => e.name === 'ext1');
@@ -197,9 +198,7 @@ describe('extension tests', () => {
         contextFileName: 'my-context-file.md',
       });
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
 
       expect(extensions).toHaveLength(1);
       const ext1 = extensions.find((e) => e.name === 'ext1');
@@ -208,7 +207,7 @@ describe('extension tests', () => {
       ]);
     });
 
-    it('should filter out disabled extensions', () => {
+    it('should annotate disabled extensions', () => {
       createExtension({
         extensionsDir: userExtensionsDir,
         name: 'disabled-extension',
@@ -219,22 +218,16 @@ describe('extension tests', () => {
         name: 'enabled-extension',
         version: '2.0.0',
       });
-      disableExtension(
+      extensionManager.disableExtension(
         'disabled-extension',
         SettingScope.User,
-        tempWorkspaceDir,
       );
-      const manager = new ExtensionEnablementManager(
-        ExtensionStorage.getUserExtensionsDir(),
-      );
-      const extensions = loadExtensions(manager);
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        tempWorkspaceDir,
-        manager,
-      ).filter((e) => e.isActive);
-      expect(activeExtensions).toHaveLength(1);
-      expect(activeExtensions[0].name).toBe('enabled-extension');
+      const extensions = extensionManager.loadExtensions();
+      expect(extensions).toHaveLength(2);
+      expect(extensions[0].name).toBe('disabled-extension');
+      expect(extensions[0].isActive).toBe(false);
+      expect(extensions[1].name).toBe('enabled-extension');
+      expect(extensions[1].isActive).toBe(true);
     });
 
     it('should hydrate variables', () => {
@@ -251,9 +244,7 @@ describe('extension tests', () => {
         },
       });
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
       expect(extensions).toHaveLength(1);
       const expectedCwd = path.join(
         userExtensionsDir,
@@ -272,18 +263,13 @@ describe('extension tests', () => {
       });
       fs.writeFileSync(path.join(sourceExtDir, 'context.md'), 'linked context');
 
-      const extensionName = await installOrUpdateExtension(
-        {
-          source: sourceExtDir,
-          type: 'link',
-        },
-        async (_) => true,
-      );
+      const extensionName = await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'link',
+      });
 
       expect(extensionName).toEqual('my-linked-extension');
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
       expect(extensions).toHaveLength(1);
 
       const linkedExt = extensions[0];
@@ -332,11 +318,7 @@ describe('extension tests', () => {
         };
         fs.writeFileSync(configPath, JSON.stringify(extensionConfig));
 
-        const extensions = loadExtensions(
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
-        );
+        const extensions = extensionManager.loadExtensions();
 
         expect(extensions).toHaveLength(1);
         const extension = extensions[0];
@@ -355,6 +337,36 @@ describe('extension tests', () => {
         delete process.env['TEST_API_KEY'];
         delete process.env['TEST_DB_URL'];
       }
+    });
+
+    it('should resolve environment variables from an extension .env file', () => {
+      const extDir = createExtension({
+        extensionsDir: userExtensionsDir,
+        name: 'test-extension',
+        version: '1.0.0',
+        mcpServers: {
+          'test-server': {
+            command: 'node',
+            args: ['server.js'],
+            env: {
+              API_KEY: '$MY_API_KEY',
+              STATIC_VALUE: 'no-substitution',
+            },
+          },
+        },
+      });
+
+      const envFilePath = path.join(extDir, '.env');
+      fs.writeFileSync(envFilePath, 'MY_API_KEY=test-key-from-file\n');
+
+      const extensions = extensionManager.loadExtensions();
+
+      expect(extensions).toHaveLength(1);
+      const extension = extensions[0];
+      const serverConfig = extension.mcpServers!['test-server'];
+      expect(serverConfig.env).toBeDefined();
+      expect(serverConfig.env!['API_KEY']).toBe('test-key-from-file');
+      expect(serverConfig.env!['STATIC_VALUE']).toBe('no-substitution');
     });
 
     it('should handle missing environment variables gracefully', () => {
@@ -387,9 +399,7 @@ describe('extension tests', () => {
         JSON.stringify(extensionConfig),
       );
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
 
       expect(extensions).toHaveLength(1);
       const extension = extensions[0];
@@ -417,9 +427,7 @@ describe('extension tests', () => {
       const badConfigPath = path.join(badExtDir, EXTENSIONS_CONFIG_FILENAME);
       fs.writeFileSync(badConfigPath, '{ "name": "bad-ext"'); // Malformed
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
 
       expect(extensions).toHaveLength(1);
       expect(extensions[0].name).toBe('good-ext');
@@ -451,9 +459,7 @@ describe('extension tests', () => {
       const badConfigPath = path.join(badExtDir, EXTENSIONS_CONFIG_FILENAME);
       fs.writeFileSync(badConfigPath, JSON.stringify({ version: '1.0.0' }));
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
 
       expect(extensions).toHaveLength(1);
       expect(extensions[0].name).toBe('good-ext');
@@ -481,9 +487,7 @@ describe('extension tests', () => {
         },
       });
 
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
+      const extensions = extensionManager.loadExtensions();
       expect(extensions).toHaveLength(1);
       expect(extensions[0].mcpServers?.['test-server'].trust).toBeUndefined();
     });
@@ -498,10 +502,7 @@ describe('extension tests', () => {
         version: '1.0.0',
       });
 
-      const extension = loadExtension({
-        extensionDir: badExtDir,
-        workspaceDir: tempWorkspaceDir,
-      });
+      const extension = extensionManager.loadExtension(badExtDir);
 
       expect(extension).toBeNull();
       expect(consoleSpy).toHaveBeenCalledWith(
@@ -509,198 +510,110 @@ describe('extension tests', () => {
       );
       consoleSpy.mockRestore();
     });
-  });
 
-  describe('annotateActiveExtensions', () => {
-    const extensions: GeminiCLIExtension[] = [
-      {
-        path: '/path/to/ext1',
-        name: 'ext1',
-        version: '1.0.0',
-        contextFiles: [],
-        isActive: true,
-      },
-      {
-        path: '/path/to/ext2',
-        name: 'ext2',
-        version: '1.0.0',
-        contextFiles: [],
-        isActive: true,
-      },
-      {
-        path: '/path/to/ext3',
-        name: 'ext3',
-        version: '1.0.0',
-        contextFiles: [],
-        isActive: true,
-      },
-    ];
+    describe('id generation', () => {
+      it('should generate id from source for non-github git urls', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'my-ext',
+          version: '1.0.0',
+          installMetadata: {
+            type: 'git',
+            source: 'http://somehost.com/foo/bar',
+          },
+        });
 
-    it('should mark all extensions as active if no enabled extensions are provided', () => {
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        '/path/to/workspace',
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
-      expect(activeExtensions).toHaveLength(3);
-      expect(activeExtensions.every((e) => e.isActive)).toBe(true);
-    });
-
-    it('should mark only the enabled extensions as active', () => {
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        '/path/to/workspace',
-        new ExtensionEnablementManager(
-          ExtensionStorage.getUserExtensionsDir(),
-          ['ext1', 'ext3'],
-        ),
-      );
-      expect(activeExtensions).toHaveLength(3);
-      expect(activeExtensions.find((e) => e.name === 'ext1')?.isActive).toBe(
-        true,
-      );
-      expect(activeExtensions.find((e) => e.name === 'ext2')?.isActive).toBe(
-        false,
-      );
-      expect(activeExtensions.find((e) => e.name === 'ext3')?.isActive).toBe(
-        true,
-      );
-    });
-
-    it('should mark all extensions as inactive when "none" is provided', () => {
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        '/path/to/workspace',
-        new ExtensionEnablementManager(
-          ExtensionStorage.getUserExtensionsDir(),
-          ['none'],
-        ),
-      );
-      expect(activeExtensions).toHaveLength(3);
-      expect(activeExtensions.every((e) => !e.isActive)).toBe(true);
-    });
-
-    it('should handle case-insensitivity', () => {
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        '/path/to/workspace',
-        new ExtensionEnablementManager(
-          ExtensionStorage.getUserExtensionsDir(),
-          ['EXT1'],
-        ),
-      );
-      expect(activeExtensions.find((e) => e.name === 'ext1')?.isActive).toBe(
-        true,
-      );
-    });
-
-    it('should log an error for unknown extensions', () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-      annotateActiveExtensions(
-        extensions,
-        '/path/to/workspace',
-        new ExtensionEnablementManager(
-          ExtensionStorage.getUserExtensionsDir(),
-          ['ext4'],
-        ),
-      );
-      expect(consoleSpy).toHaveBeenCalledWith('Extension not found: ext4');
-      consoleSpy.mockRestore();
-    });
-
-    describe('autoUpdate', () => {
-      it('should be false if autoUpdate is not set in install metadata', () => {
-        const activeExtensions = annotateActiveExtensions(
-          extensions,
-          tempHomeDir,
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
-        );
-        expect(
-          activeExtensions.every(
-            (e) => e.installMetadata?.autoUpdate === false,
-          ),
-        ).toBe(false);
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('http://somehost.com/foo/bar'));
       });
 
-      it('should be true if autoUpdate is true in install metadata', () => {
-        const extensionsWithAutoUpdate: GeminiCLIExtension[] = extensions.map(
-          (e) => ({
-            ...e,
-            installMetadata: {
-              ...e.installMetadata!,
-              autoUpdate: true,
-            },
-          }),
-        );
-        const activeExtensions = annotateActiveExtensions(
-          extensionsWithAutoUpdate,
-          tempHomeDir,
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
-        );
-        expect(
-          activeExtensions.every((e) => e.installMetadata?.autoUpdate === true),
-        ).toBe(true);
+      it('should generate id from owner/repo for github http urls', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'my-ext',
+          version: '1.0.0',
+          installMetadata: {
+            type: 'git',
+            source: 'http://github.com/foo/bar',
+          },
+        });
+
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('https://github.com/foo/bar'));
       });
 
-      it('should respect the per-extension settings from install metadata', () => {
-        const extensionsWithAutoUpdate: GeminiCLIExtension[] = [
-          {
-            path: '/path/to/ext1',
-            name: 'ext1',
-            version: '1.0.0',
-            contextFiles: [],
-            installMetadata: {
-              source: 'test',
-              type: 'local',
-              autoUpdate: true,
-            },
-            isActive: true,
+      it('should generate id from owner/repo for github ssh urls', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'my-ext',
+          version: '1.0.0',
+          installMetadata: {
+            type: 'git',
+            source: 'git@github.com:foo/bar',
           },
-          {
-            path: '/path/to/ext2',
-            name: 'ext2',
-            version: '1.0.0',
-            contextFiles: [],
-            installMetadata: {
-              source: 'test',
-              type: 'local',
-              autoUpdate: false,
-            },
-            isActive: true,
+        });
+
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('https://github.com/foo/bar'));
+      });
+
+      it('should generate id from source for github-release extension', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'my-ext',
+          version: '1.0.0',
+          installMetadata: {
+            type: 'github-release',
+            source: 'https://github.com/foo/bar',
           },
-          {
-            path: '/path/to/ext3',
-            name: 'ext3',
-            version: '1.0.0',
-            contextFiles: [],
-            isActive: true,
+        });
+
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('https://github.com/foo/bar'));
+      });
+
+      it('should generate id from the original source for local extension', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'local-ext-name',
+          version: '1.0.0',
+          installMetadata: {
+            type: 'local',
+            source: '/some/path',
           },
-        ];
-        const activeExtensions = annotateActiveExtensions(
-          extensionsWithAutoUpdate,
-          tempHomeDir,
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
+        });
+
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('/some/path'));
+      });
+
+      it('should generate id from the original source for linked extensions', async () => {
+        const extDevelopmentDir = path.join(tempHomeDir, 'local_extensions');
+        const actualExtensionDir = createExtension({
+          extensionsDir: extDevelopmentDir,
+          name: 'link-ext-name',
+          version: '1.0.0',
+        });
+        const extensionName = await extensionManager.installOrUpdateExtension({
+          type: 'link',
+          source: actualExtensionDir,
+        });
+
+        const extension = extensionManager.loadExtension(
+          new ExtensionStorage(extensionName).getExtensionDir(),
         );
-        expect(
-          activeExtensions.find((e) => e.name === 'ext1')?.installMetadata
-            ?.autoUpdate,
-        ).toBe(true);
-        expect(
-          activeExtensions.find((e) => e.name === 'ext2')?.installMetadata
-            ?.autoUpdate,
-        ).toBe(false);
-        expect(
-          activeExtensions.find((e) => e.name === 'ext3')?.installMetadata
-            ?.autoUpdate,
-        ).toBe(undefined);
+        expect(extension?.id).toBe(hashValue(actualExtensionDir));
+      });
+
+      it('should generate id from name for extension with no install metadata', () => {
+        const extensionDir = createExtension({
+          extensionsDir: userExtensionsDir,
+          name: 'no-meta-name',
+          version: '1.0.0',
+        });
+
+        const extension = extensionManager.loadExtension(extensionDir);
+        expect(extension?.id).toBe(hashValue('no-meta-name'));
       });
     });
   });
@@ -715,10 +628,10 @@ describe('extension tests', () => {
       const targetExtDir = path.join(userExtensionsDir, 'my-local-extension');
       const metadataPath = path.join(targetExtDir, INSTALL_METADATA_FILENAME);
 
-      await installOrUpdateExtension(
-        { source: sourceExtDir, type: 'local' },
-        async (_) => true,
-      );
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+      });
 
       expect(fs.existsSync(targetExtDir)).toBe(true);
       expect(fs.existsSync(metadataPath)).toBe(true);
@@ -736,15 +649,15 @@ describe('extension tests', () => {
         name: 'my-local-extension',
         version: '1.0.0',
       });
-      await installOrUpdateExtension(
-        { source: sourceExtDir, type: 'local' },
-        async (_) => true,
-      );
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+      });
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async (_) => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow(
         'Extension "my-local-extension" is already installed. Please uninstall it first.',
       );
@@ -756,10 +669,10 @@ describe('extension tests', () => {
       const configPath = path.join(sourceExtDir, EXTENSIONS_CONFIG_FILENAME);
 
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async (_) => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow(`Configuration file not found at ${configPath}`);
 
       const targetExtDir = path.join(userExtensionsDir, 'bad-extension');
@@ -773,10 +686,10 @@ describe('extension tests', () => {
       fs.writeFileSync(configPath, '{ "name": "bad-json", "version": "1.0.0"'); // Malformed JSON
 
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async (_) => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow(
         new RegExp(
           `^Failed to load extension config from ${configPath.replace(
@@ -798,10 +711,10 @@ describe('extension tests', () => {
       fs.writeFileSync(configPath, JSON.stringify({ version: '1.0.0' }));
 
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async (_) => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow(
         `Invalid configuration in ${configPath}: missing "name"`,
       );
@@ -829,10 +742,10 @@ describe('extension tests', () => {
         type: 'github-release',
       });
 
-      await installOrUpdateExtension(
-        { source: gitUrl, type: 'git' },
-        async (_) => true,
-      );
+      await extensionManager.installOrUpdateExtension({
+        source: gitUrl,
+        type: 'git',
+      });
 
       expect(fs.existsSync(targetExtDir)).toBe(true);
       expect(fs.existsSync(metadataPath)).toBe(true);
@@ -853,10 +766,10 @@ describe('extension tests', () => {
       const metadataPath = path.join(targetExtDir, INSTALL_METADATA_FILENAME);
       const configPath = path.join(targetExtDir, EXTENSIONS_CONFIG_FILENAME);
 
-      await installOrUpdateExtension(
-        { source: sourceExtDir, type: 'link' },
-        async (_) => true,
-      );
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'link',
+      });
 
       expect(fs.existsSync(targetExtDir)).toBe(true);
       expect(fs.existsSync(metadataPath)).toBe(true);
@@ -883,20 +796,18 @@ describe('extension tests', () => {
             version: '1.1.0',
           });
           if (isUpdate) {
-            await installOrUpdateExtension(
-              { source: sourceExtDir, type: 'local' },
-              async (_) => true,
-            );
+            await extensionManager.installOrUpdateExtension({
+              source: sourceExtDir,
+              type: 'local',
+            });
           }
           // Clears out any calls to mocks from the above function calls.
           vi.clearAllMocks();
         });
 
         it(`should log an ${isUpdate ? 'update' : 'install'} event to clearcut on success`, async () => {
-          await installOrUpdateExtension(
+          await extensionManager.installOrUpdateExtension(
             { source: sourceExtDir, type: 'local' },
-            async (_) => true,
-            undefined,
             isUpdate
               ? {
                   name: 'my-local-extension',
@@ -915,15 +826,11 @@ describe('extension tests', () => {
         });
 
         it(`should ${isUpdate ? 'not ' : ''} alter the extension enablement configuration`, async () => {
-          const enablementManager = new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          );
+          const enablementManager = new ExtensionEnablementManager();
           enablementManager.enable('my-local-extension', true, '/some/scope');
 
-          await installOrUpdateExtension(
+          await extensionManager.installOrUpdateExtension(
             { source: sourceExtDir, type: 'local' },
-            async (_) => true,
-            undefined,
             isUpdate
               ? {
                   name: 'my-local-extension',
@@ -961,14 +868,11 @@ describe('extension tests', () => {
         },
       });
 
-      const mockRequestConsent = vi.fn();
-      mockRequestConsent.mockResolvedValue(true);
-
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          mockRequestConsent,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).resolves.toBe('my-local-extension');
 
       expect(mockRequestConsent).toHaveBeenCalledWith(
@@ -994,10 +898,10 @@ This extension will run the following MCP servers:
       });
 
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async () => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).resolves.toBe('my-local-extension');
     });
 
@@ -1013,12 +917,12 @@ This extension will run the following MCP servers:
           },
         },
       });
-
+      mockRequestConsent.mockResolvedValue(false);
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async () => false,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow('Installation cancelled for "my-local-extension".');
     });
 
@@ -1031,14 +935,11 @@ This extension will run the following MCP servers:
       const targetExtDir = path.join(userExtensionsDir, 'my-local-extension');
       const metadataPath = path.join(targetExtDir, INSTALL_METADATA_FILENAME);
 
-      await installOrUpdateExtension(
-        {
-          source: sourceExtDir,
-          type: 'local',
-          autoUpdate: true,
-        },
-        async (_) => true,
-      );
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+        autoUpdate: true,
+      });
 
       expect(fs.existsSync(targetExtDir)).toBe(true);
       expect(fs.existsSync(metadataPath)).toBe(true);
@@ -1064,28 +965,193 @@ This extension will run the following MCP servers:
         },
       });
 
-      const mockRequestConsent = vi.fn();
-      // Install it and force consent first.
-      await installOrUpdateExtension(
-        { source: sourceExtDir, type: 'local' },
-        async () => true,
-      );
+      // Install it with hard coded consent first.
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+      });
+      expect(mockRequestConsent).toHaveBeenCalledOnce();
 
       // Now update it without changing anything.
       await expect(
-        installOrUpdateExtension(
+        extensionManager.installOrUpdateExtension(
           { source: sourceExtDir, type: 'local' },
-          mockRequestConsent,
-          process.cwd(),
           // Provide its own existing config as the previous config.
-          await loadExtensionConfig({
-            extensionDir: sourceExtDir,
-            workspaceDir: process.cwd(),
-          }),
+          await extensionManager.loadExtensionConfig(sourceExtDir),
         ),
       ).resolves.toBe('my-local-extension');
 
-      expect(mockRequestConsent).not.toHaveBeenCalled();
+      // Still only called once
+      expect(mockRequestConsent).toHaveBeenCalledOnce();
+    });
+
+    it('should prompt for settings if promptForSettings', async () => {
+      const sourceExtDir = createExtension({
+        extensionsDir: tempHomeDir,
+        name: 'my-local-extension',
+        version: '1.0.0',
+        settings: [
+          {
+            name: 'API Key',
+            description: 'Your API key for the service.',
+            envVar: 'MY_API_KEY',
+          },
+        ],
+      });
+
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+      });
+
+      expect(mockPromptForSettings).toHaveBeenCalled();
+    });
+
+    it('should not prompt for settings if promptForSettings is false', async () => {
+      const sourceExtDir = createExtension({
+        extensionsDir: tempHomeDir,
+        name: 'my-local-extension',
+        version: '1.0.0',
+        settings: [
+          {
+            name: 'API Key',
+            description: 'Your API key for the service.',
+            envVar: 'MY_API_KEY',
+          },
+        ],
+      });
+
+      extensionManager = new ExtensionManager({
+        workspaceDir: tempWorkspaceDir,
+        requestConsent: mockRequestConsent,
+        requestSetting: null,
+        loadedSettings: loadSettings(tempWorkspaceDir),
+      });
+
+      await extensionManager.installOrUpdateExtension({
+        source: sourceExtDir,
+        type: 'local',
+      });
+    });
+
+    it('should only prompt for new settings on update, and preserve old settings', async () => {
+      // 1. Create and install the "old" version of the extension.
+      const oldSourceExtDir = createExtension({
+        extensionsDir: tempHomeDir, // Create it in a temp location first
+        name: 'my-local-extension',
+        version: '1.0.0',
+        settings: [
+          {
+            name: 'API Key',
+            description: 'Your API key for the service.',
+            envVar: 'MY_API_KEY',
+          },
+        ],
+      });
+
+      mockPromptForSettings.mockResolvedValueOnce('old-api-key');
+      // Install it so it exists in the userExtensionsDir
+      await extensionManager.installOrUpdateExtension({
+        source: oldSourceExtDir,
+        type: 'local',
+      });
+
+      const envPath = new ExtensionStorage(
+        'my-local-extension',
+      ).getEnvFilePath();
+      expect(fs.existsSync(envPath)).toBe(true);
+      let envContent = fs.readFileSync(envPath, 'utf-8');
+      expect(envContent).toContain('MY_API_KEY=old-api-key');
+      expect(mockPromptForSettings).toHaveBeenCalledTimes(1);
+
+      // 2. Create the "new" version of the extension in a new source directory.
+      const newSourceExtDir = createExtension({
+        extensionsDir: path.join(tempHomeDir, 'new-source'), // Another temp location
+        name: 'my-local-extension', // Same name
+        version: '1.1.0', // New version
+        settings: [
+          {
+            name: 'API Key',
+            description: 'Your API key for the service.',
+            envVar: 'MY_API_KEY',
+          },
+          {
+            name: 'New Setting',
+            description: 'A new setting.',
+            envVar: 'NEW_SETTING',
+          },
+        ],
+      });
+
+      const previousExtensionConfig = extensionManager.loadExtensionConfig(
+        path.join(userExtensionsDir, 'my-local-extension'),
+      );
+      mockPromptForSettings.mockResolvedValueOnce('new-setting-value');
+
+      // 3. Call installOrUpdateExtension to perform the update.
+      await extensionManager.installOrUpdateExtension(
+        { source: newSourceExtDir, type: 'local' },
+        previousExtensionConfig,
+      );
+
+      expect(mockPromptForSettings).toHaveBeenCalledTimes(2);
+      expect(mockPromptForSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New Setting' }),
+      );
+
+      expect(fs.existsSync(envPath)).toBe(true);
+      envContent = fs.readFileSync(envPath, 'utf-8');
+      expect(envContent).toContain('MY_API_KEY=old-api-key');
+      expect(envContent).toContain('NEW_SETTING=new-setting-value');
+    });
+
+    it('should fail auto-update if settings have changed', async () => {
+      // 1. Install initial version with autoUpdate: true
+      const oldSourceExtDir = createExtension({
+        extensionsDir: tempHomeDir,
+        name: 'my-auto-update-ext',
+        version: '1.0.0',
+        settings: [
+          {
+            name: 'OLD_SETTING',
+            envVar: 'OLD_SETTING',
+            description: 'An old setting',
+          },
+        ],
+      });
+      await extensionManager.installOrUpdateExtension({
+        source: oldSourceExtDir,
+        type: 'local',
+        autoUpdate: true,
+      });
+
+      // 2. Create new version with different settings
+      const newSourceExtDir = createExtension({
+        extensionsDir: tempHomeDir,
+        name: 'my-auto-update-ext',
+        version: '1.1.0',
+        settings: [
+          {
+            name: 'NEW_SETTING',
+            envVar: 'NEW_SETTING',
+            description: 'A new setting',
+          },
+        ],
+      });
+
+      const previousExtensionConfig = extensionManager.loadExtensionConfig(
+        path.join(userExtensionsDir, 'my-auto-update-ext'),
+      );
+
+      // 3. Attempt to update and assert it fails
+      await expect(
+        extensionManager.installOrUpdateExtension(
+          { source: newSourceExtDir, type: 'local', autoUpdate: true },
+          previousExtensionConfig,
+        ),
+      ).rejects.toThrow(
+        'Extension "my-auto-update-ext" has settings changes and cannot be auto-updated. Please update manually.',
+      );
     });
 
     it('should throw an error for invalid extension names', async () => {
@@ -1096,10 +1162,10 @@ This extension will run the following MCP servers:
       });
 
       await expect(
-        installOrUpdateExtension(
-          { source: sourceExtDir, type: 'local' },
-          async (_) => true,
-        ),
+        extensionManager.installOrUpdateExtension({
+          source: sourceExtDir,
+          type: 'local',
+        }),
       ).rejects.toThrow('Invalid extension name: "bad_name"');
     });
 
@@ -1144,10 +1210,10 @@ This extension will run the following MCP servers:
           join(tempDir, extensionName),
         );
 
-        await installOrUpdateExtension(
-          { source: gitUrl, type: 'github-release' },
-          async () => true,
-        );
+        await extensionManager.installOrUpdateExtension({
+          source: gitUrl,
+          type: 'github-release',
+        });
 
         expect(fs.existsSync(targetExtDir)).toBe(true);
         const metadataPath = path.join(targetExtDir, INSTALL_METADATA_FILENAME);
@@ -1167,17 +1233,15 @@ This extension will run the following MCP servers:
           errorMessage: 'download failed',
           type: 'github-release',
         });
-        const requestConsent = vi.fn().mockResolvedValue(true);
 
-        await installOrUpdateExtension(
+        await extensionManager.installOrUpdateExtension(
           { source: gitUrl, type: 'github-release' }, // Use github-release to force consent
-          requestConsent,
         );
 
         // It gets called once to ask for a git clone, and once to consent to
         // the actual extension features.
-        expect(requestConsent).toHaveBeenCalledTimes(2);
-        expect(requestConsent).toHaveBeenCalledWith(
+        expect(mockRequestConsent).toHaveBeenCalledTimes(2);
+        expect(mockRequestConsent).toHaveBeenCalledWith(
           expect.stringContaining(
             'Would you like to attempt to install via "git clone" instead?',
           ),
@@ -1198,18 +1262,18 @@ This extension will run the following MCP servers:
           errorMessage: 'download failed',
           type: 'github-release',
         });
-        const requestConsent = vi.fn().mockResolvedValue(false);
+        mockRequestConsent.mockResolvedValue(false);
 
         await expect(
-          installOrUpdateExtension(
-            { source: gitUrl, type: 'github-release' },
-            requestConsent,
-          ),
+          extensionManager.installOrUpdateExtension({
+            source: gitUrl,
+            type: 'github-release',
+          }),
         ).rejects.toThrow(
           `Failed to install extension ${gitUrl}: download failed`,
         );
 
-        expect(requestConsent).toHaveBeenCalledExactlyOnceWith(
+        expect(mockRequestConsent).toHaveBeenCalledExactlyOnceWith(
           expect.stringContaining(
             'Would you like to attempt to install via "git clone" instead?',
           ),
@@ -1223,16 +1287,15 @@ This extension will run the following MCP servers:
           failureReason: 'no release data',
           type: 'github-release',
         });
-        const requestConsent = vi.fn().mockResolvedValue(true);
 
-        await installOrUpdateExtension(
-          { source: gitUrl, type: 'git' },
-          requestConsent,
-        );
+        await extensionManager.installOrUpdateExtension({
+          source: gitUrl,
+          type: 'git',
+        });
 
         // We should not see the request to use git clone, this is a repo that
         // has no github releases so it is the only install method.
-        expect(requestConsent).toHaveBeenCalledExactlyOnceWith(
+        expect(mockRequestConsent).toHaveBeenCalledExactlyOnceWith(
           expect.stringContaining(
             'Installing extension "gemini-test-extension"',
           ),
@@ -1254,14 +1317,12 @@ This extension will run the following MCP servers:
           errorMessage: 'No release data found',
           type: 'github-release',
         });
-        const requestConsent = vi.fn().mockResolvedValue(true);
 
-        await installOrUpdateExtension(
+        await extensionManager.installOrUpdateExtension(
           { source: gitUrl, type: 'github-release' }, // Note the type
-          requestConsent,
         );
 
-        expect(requestConsent).toHaveBeenCalledWith(
+        expect(mockRequestConsent).toHaveBeenCalledWith(
           expect.stringContaining(
             'Would you like to attempt to install via "git clone" instead?',
           ),
@@ -1279,7 +1340,7 @@ This extension will run the following MCP servers:
         version: '1.0.0',
       });
 
-      await uninstallExtension('my-local-extension', false);
+      await extensionManager.uninstallExtension('my-local-extension', false);
 
       expect(fs.existsSync(sourceExtDir)).toBe(false);
     });
@@ -1296,22 +1357,16 @@ This extension will run the following MCP servers:
         version: '1.0.0',
       });
 
-      await uninstallExtension('my-local-extension', false);
+      await extensionManager.uninstallExtension('my-local-extension', false);
 
       expect(fs.existsSync(sourceExtDir)).toBe(false);
-      expect(
-        loadExtensions(
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
-        ),
-      ).toHaveLength(1);
+      expect(extensionManager.loadExtensions()).toHaveLength(1);
       expect(fs.existsSync(otherExtDir)).toBe(true);
     });
 
     it('should throw an error if the extension does not exist', async () => {
       await expect(
-        uninstallExtension('nonexistent-extension', false),
+        extensionManager.uninstallExtension('nonexistent-extension', false),
       ).rejects.toThrow('Extension not found.');
     });
 
@@ -1321,9 +1376,16 @@ This extension will run the following MCP servers:
           extensionsDir: userExtensionsDir,
           name: 'my-local-extension',
           version: '1.0.0',
+          installMetadata: {
+            source: userExtensionsDir,
+            type: 'local',
+          },
         });
 
-        await uninstallExtension('my-local-extension', isUpdate);
+        await extensionManager.uninstallExtension(
+          'my-local-extension',
+          isUpdate,
+        );
 
         if (isUpdate) {
           expect(mockLogExtensionUninstall).not.toHaveBeenCalled();
@@ -1331,7 +1393,8 @@ This extension will run the following MCP servers:
         } else {
           expect(mockLogExtensionUninstall).toHaveBeenCalled();
           expect(ExtensionUninstallEvent).toHaveBeenCalledWith(
-            'my-local-extension',
+            hashValue('my-local-extension'),
+            hashValue(userExtensionsDir),
             'success',
           );
         }
@@ -1343,12 +1406,10 @@ This extension will run the following MCP servers:
           name: 'test-extension',
           version: '1.0.0',
         });
-        const enablementManager = new ExtensionEnablementManager(
-          ExtensionStorage.getUserExtensionsDir(),
-        );
+        const enablementManager = new ExtensionEnablementManager();
         enablementManager.enable('test-extension', true, '/some/scope');
 
-        await uninstallExtension('test-extension', isUpdate);
+        await extensionManager.uninstallExtension('test-extension', isUpdate);
 
         const config = enablementManager.readConfig()['test-extension'];
         if (isUpdate) {
@@ -1372,12 +1433,13 @@ This extension will run the following MCP servers:
         },
       });
 
-      await uninstallExtension(gitUrl, false);
+      await extensionManager.uninstallExtension(gitUrl, false);
 
       expect(fs.existsSync(sourceExtDir)).toBe(false);
       expect(mockLogExtensionUninstall).toHaveBeenCalled();
       expect(ExtensionUninstallEvent).toHaveBeenCalledWith(
-        'gemini-sql-extension',
+        hashValue('gemini-sql-extension'),
+        hashValue('https://github.com/google/gemini-sql-extension'),
         'success',
       );
     });
@@ -1391,187 +1453,11 @@ This extension will run the following MCP servers:
       });
 
       await expect(
-        uninstallExtension(
+        extensionManager.uninstallExtension(
           'https://github.com/google/no-metadata-extension',
           false,
         ),
       ).rejects.toThrow('Extension not found.');
-    });
-  });
-
-  describe('performWorkspaceExtensionMigration', () => {
-    let workspaceExtensionsDir: string;
-
-    beforeEach(() => {
-      workspaceExtensionsDir = path.join(
-        tempWorkspaceDir,
-        EXTENSIONS_DIRECTORY_NAME,
-      );
-      fs.mkdirSync(workspaceExtensionsDir, { recursive: true });
-    });
-
-    afterEach(() => {
-      fs.rmSync(workspaceExtensionsDir, { recursive: true, force: true });
-    });
-
-    describe('folder trust', () => {
-      it('refuses to install extensions from untrusted folders', async () => {
-        vi.mocked(isWorkspaceTrusted).mockReturnValue({
-          isTrusted: false,
-          source: undefined,
-        });
-        const ext1Path = createExtension({
-          extensionsDir: workspaceExtensionsDir,
-          name: 'ext1',
-          version: '1.0.0',
-        });
-
-        const failed = await performWorkspaceExtensionMigration(
-          [
-            loadExtension({
-              extensionDir: ext1Path,
-              workspaceDir: tempWorkspaceDir,
-            })!,
-          ],
-          async () => true,
-        );
-
-        expect(failed).toEqual(['ext1']);
-      });
-
-      it('does not copy extensions to the user dir', async () => {
-        vi.mocked(isWorkspaceTrusted).mockReturnValue({
-          isTrusted: false,
-          source: undefined,
-        });
-        const ext1Path = createExtension({
-          extensionsDir: workspaceExtensionsDir,
-          name: 'ext1',
-          version: '1.0.0',
-        });
-
-        await performWorkspaceExtensionMigration(
-          [
-            loadExtension({
-              extensionDir: ext1Path,
-              workspaceDir: tempWorkspaceDir,
-            })!,
-          ],
-          async (_) => true,
-        );
-
-        const userExtensionsDir = path.join(
-          tempHomeDir,
-          GEMINI_DIR,
-          'extensions',
-        );
-        expect(fs.readdirSync(userExtensionsDir).length).toBe(0);
-      });
-
-      it('does not load any extensions in the workspace config', async () => {
-        vi.mocked(isWorkspaceTrusted).mockReturnValue({
-          isTrusted: false,
-          source: undefined,
-        });
-        const ext1Path = createExtension({
-          extensionsDir: workspaceExtensionsDir,
-          name: 'ext1',
-          version: '1.0.0',
-        });
-
-        await performWorkspaceExtensionMigration(
-          [
-            loadExtension({
-              extensionDir: ext1Path,
-              workspaceDir: tempWorkspaceDir,
-            })!,
-          ],
-          async (_) => true,
-        );
-        const extensions = loadExtensions(
-          new ExtensionEnablementManager(
-            ExtensionStorage.getUserExtensionsDir(),
-          ),
-        );
-
-        expect(extensions).toEqual([]);
-      });
-    });
-
-    it('should install the extensions in the user directory', async () => {
-      const ext1Path = createExtension({
-        extensionsDir: workspaceExtensionsDir,
-        name: 'ext1',
-        version: '1.0.0',
-      });
-      const ext2Path = createExtension({
-        extensionsDir: workspaceExtensionsDir,
-        name: 'ext2',
-        version: '1.0.0',
-      });
-      const extensionsToMigrate: GeminiCLIExtension[] = [
-        loadExtension({
-          extensionDir: ext1Path,
-          workspaceDir: tempWorkspaceDir,
-        })!,
-        loadExtension({
-          extensionDir: ext2Path,
-          workspaceDir: tempWorkspaceDir,
-        })!,
-      ];
-      const failed = await performWorkspaceExtensionMigration(
-        extensionsToMigrate,
-        async (_) => true,
-      );
-
-      expect(failed).toEqual([]);
-
-      const userExtensionsDir = path.join(
-        tempHomeDir,
-        GEMINI_DIR,
-        'extensions',
-      );
-      const userExt1Path = path.join(userExtensionsDir, 'ext1');
-      const extensions = loadExtensions(
-        new ExtensionEnablementManager(ExtensionStorage.getUserExtensionsDir()),
-      );
-
-      expect(extensions).toHaveLength(2);
-      const metadataPath = path.join(userExt1Path, INSTALL_METADATA_FILENAME);
-      expect(fs.existsSync(metadataPath)).toBe(true);
-      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-      expect(metadata).toEqual({
-        source: ext1Path,
-        type: 'local',
-      });
-    });
-
-    it('should return the names of failed installations', async () => {
-      const ext1Path = createExtension({
-        extensionsDir: workspaceExtensionsDir,
-        name: 'ext1',
-        version: '1.0.0',
-      });
-
-      const extensions: GeminiCLIExtension[] = [
-        loadExtension({
-          extensionDir: ext1Path,
-          workspaceDir: tempWorkspaceDir,
-        })!,
-        {
-          path: '/ext/path/1',
-          name: 'ext2',
-          version: '1.0.0',
-          contextFiles: [],
-          isActive: true,
-        },
-      ];
-
-      const failed = await performWorkspaceExtensionMigration(
-        extensions,
-        async (_) => true,
-      );
-      expect(failed).toEqual(['ext2']);
     });
   });
 
@@ -1583,11 +1469,10 @@ This extension will run the following MCP servers:
         version: '1.0.0',
       });
 
-      disableExtension('my-extension', SettingScope.User);
+      extensionManager.disableExtension('my-extension', SettingScope.User);
       expect(
         isEnabled({
           name: 'my-extension',
-          configDir: userExtensionsDir,
           enabledForPath: tempWorkspaceDir,
         }),
       ).toBe(false);
@@ -1600,22 +1485,16 @@ This extension will run the following MCP servers:
         version: '1.0.0',
       });
 
-      disableExtension(
-        'my-extension',
-        SettingScope.Workspace,
-        tempWorkspaceDir,
-      );
+      extensionManager.disableExtension('my-extension', SettingScope.Workspace);
       expect(
         isEnabled({
           name: 'my-extension',
-          configDir: userExtensionsDir,
           enabledForPath: tempHomeDir,
         }),
       ).toBe(true);
       expect(
         isEnabled({
           name: 'my-extension',
-          configDir: userExtensionsDir,
           enabledForPath: tempWorkspaceDir,
         }),
       ).toBe(false);
@@ -1628,12 +1507,11 @@ This extension will run the following MCP servers:
         version: '1.0.0',
       });
 
-      disableExtension('my-extension', SettingScope.User);
-      disableExtension('my-extension', SettingScope.User);
+      extensionManager.disableExtension('my-extension', SettingScope.User);
+      extensionManager.disableExtension('my-extension', SettingScope.User);
       expect(
         isEnabled({
           name: 'my-extension',
-          configDir: userExtensionsDir,
           enabledForPath: tempWorkspaceDir,
         }),
       ).toBe(false);
@@ -1641,7 +1519,7 @@ This extension will run the following MCP servers:
 
     it('should throw an error if you request system scope', () => {
       expect(() =>
-        disableExtension('my-extension', SettingScope.System),
+        extensionManager.disableExtension('my-extension', SettingScope.System),
       ).toThrow('System and SystemDefaults scopes are not supported.');
     });
 
@@ -1650,13 +1528,18 @@ This extension will run the following MCP servers:
         extensionsDir: userExtensionsDir,
         name: 'ext1',
         version: '1.0.0',
+        installMetadata: {
+          source: userExtensionsDir,
+          type: 'local',
+        },
       });
 
-      disableExtension('ext1', SettingScope.Workspace);
+      extensionManager.disableExtension('ext1', SettingScope.Workspace);
 
       expect(mockLogExtensionDisable).toHaveBeenCalled();
       expect(ExtensionDisableEvent).toHaveBeenCalledWith(
-        'ext1',
+        hashValue('ext1'),
+        hashValue(userExtensionsDir),
         SettingScope.Workspace,
       );
     });
@@ -1668,16 +1551,8 @@ This extension will run the following MCP servers:
     });
 
     const getActiveExtensions = (): GeminiCLIExtension[] => {
-      const manager = new ExtensionEnablementManager(
-        ExtensionStorage.getUserExtensionsDir(),
-      );
-      const extensions = loadExtensions(manager);
-      const activeExtensions = annotateActiveExtensions(
-        extensions,
-        tempWorkspaceDir,
-        manager,
-      );
-      return activeExtensions.filter((e) => e.isActive);
+      const extensions = extensionManager.loadExtensions();
+      return extensions.filter((e) => e.isActive);
     };
 
     it('should enable an extension at the user scope', () => {
@@ -1686,11 +1561,11 @@ This extension will run the following MCP servers:
         name: 'ext1',
         version: '1.0.0',
       });
-      disableExtension('ext1', SettingScope.User);
+      extensionManager.disableExtension('ext1', SettingScope.User);
       let activeExtensions = getActiveExtensions();
       expect(activeExtensions).toHaveLength(0);
 
-      enableExtension('ext1', SettingScope.User);
+      extensionManager.enableExtension('ext1', SettingScope.User);
       activeExtensions = getActiveExtensions();
       expect(activeExtensions).toHaveLength(1);
       expect(activeExtensions[0].name).toBe('ext1');
@@ -1702,11 +1577,11 @@ This extension will run the following MCP servers:
         name: 'ext1',
         version: '1.0.0',
       });
-      disableExtension('ext1', SettingScope.Workspace);
+      extensionManager.disableExtension('ext1', SettingScope.Workspace);
       let activeExtensions = getActiveExtensions();
       expect(activeExtensions).toHaveLength(0);
 
-      enableExtension('ext1', SettingScope.Workspace);
+      extensionManager.enableExtension('ext1', SettingScope.Workspace);
       activeExtensions = getActiveExtensions();
       expect(activeExtensions).toHaveLength(1);
       expect(activeExtensions[0].name).toBe('ext1');
@@ -1717,24 +1592,25 @@ This extension will run the following MCP servers:
         extensionsDir: userExtensionsDir,
         name: 'ext1',
         version: '1.0.0',
+        installMetadata: {
+          source: userExtensionsDir,
+          type: 'local',
+        },
       });
-      disableExtension('ext1', SettingScope.Workspace);
-      enableExtension('ext1', SettingScope.Workspace);
+      extensionManager.disableExtension('ext1', SettingScope.Workspace);
+      extensionManager.enableExtension('ext1', SettingScope.Workspace);
 
       expect(mockLogExtensionEnable).toHaveBeenCalled();
       expect(ExtensionEnableEvent).toHaveBeenCalledWith(
-        'ext1',
+        hashValue('ext1'),
+        hashValue(userExtensionsDir),
         SettingScope.Workspace,
       );
     });
   });
 });
 
-function isEnabled(options: {
-  name: string;
-  configDir: string;
-  enabledForPath: string;
-}) {
-  const manager = new ExtensionEnablementManager(options.configDir);
+function isEnabled(options: { name: string; enabledForPath: string }) {
+  const manager = new ExtensionEnablementManager();
   return manager.isEnabled(options.name, options.enabledForPath);
 }
