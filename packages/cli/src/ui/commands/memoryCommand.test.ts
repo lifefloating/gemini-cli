@@ -186,6 +186,9 @@ describe('memoryCommand', () => {
           include: [],
         }),
         isTrustedFolder: () => false,
+        updateSystemInstructionIfInitialized: vi
+          .fn()
+          .mockResolvedValue(undefined),
       };
 
       mockContext = createMockCommandContext({
