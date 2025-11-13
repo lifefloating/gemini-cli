@@ -514,7 +514,7 @@ export class Config {
       params.truncateToolOutputLines ?? DEFAULT_TRUNCATE_TOOL_OUTPUT_LINES;
     this.enableToolOutputTruncation = params.enableToolOutputTruncation ?? true;
     this.useSmartEdit = params.useSmartEdit ?? true;
-    this.useWriteTodos = params.useWriteTodos ?? false;
+    this.useWriteTodos = params.useWriteTodos ?? true;
     this.initialUseModelRouter = params.useModelRouter ?? false;
     this.useModelRouter = this.initialUseModelRouter;
     this.disableModelRouterForAuth = params.disableModelRouterForAuth ?? [];
@@ -650,7 +650,7 @@ export class Config {
         if (list.includes(tool.name) || list.includes(tool.alternateName)) {
           coreEvents.emitFeedback(
             'warning',
-            `The tool '${tool.name}' (or '${tool.alternateName}') specified in '${listName}' is deprecated and will be removed in v0.14.0.`,
+            `The tool '${tool.name}' (or '${tool.alternateName}') specified in '${listName}' is deprecated and will be removed in v0.16.0.`,
           );
         }
       }
@@ -769,12 +769,11 @@ export class Config {
   }
 
   setModel(newModel: string): void {
-    this.setFallbackMode(false);
-
-    if (this.model !== newModel) {
+    if (this.model !== newModel || this.inFallbackMode) {
       this.model = newModel;
       coreEvents.emitModelChanged(newModel);
     }
+    this.setFallbackMode(false);
   }
 
   isInFallbackMode(): boolean {
