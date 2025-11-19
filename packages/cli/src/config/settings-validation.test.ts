@@ -192,6 +192,59 @@ describe('settings-validation', () => {
       const result = validateSettings(validSettings);
       expect(result.success).toBe(true);
     });
+
+    it('should validate complex nested mcpServers configuration', () => {
+      const invalidSettings = {
+        mcpServers: {
+          'my-server': {
+            command: 123, // Should be string
+            args: ['arg1'],
+            env: {
+              VAR: 'value',
+            },
+          },
+        },
+      };
+
+      const result = validateSettings(invalidSettings);
+      expect(result.success).toBe(false);
+      if (result.error) {
+        expect(result.error.issues.length).toBeGreaterThan(0);
+        // Path should be mcpServers.my-server.command
+        const issue = result.error.issues.find((i) =>
+          i.path.includes('command'),
+        );
+        expect(issue).toBeDefined();
+        expect(issue?.code).toBe('invalid_type');
+      }
+    });
+
+    it('should validate complex nested customThemes configuration', () => {
+      const invalidSettings = {
+        ui: {
+          customThemes: {
+            'my-theme': {
+              type: 'custom',
+              // Missing 'name' property which is required
+              text: {
+                primary: '#ffffff',
+              },
+            },
+          },
+        },
+      };
+
+      const result = validateSettings(invalidSettings);
+      expect(result.success).toBe(false);
+      if (result.error) {
+        expect(result.error.issues.length).toBeGreaterThan(0);
+        // Should complain about missing 'name'
+        const issue = result.error.issues.find(
+          (i) => i.code === 'invalid_type' && i.message.includes('Required'),
+        );
+        expect(issue).toBeDefined();
+      }
+    });
   });
 
   describe('formatValidationError', () => {
@@ -282,6 +335,45 @@ describe('settings-validation', () => {
 
         // Should have multiple errors listed
         expect(formatted.match(/Error in:/g)?.length).toBeGreaterThan(1);
+      }
+    });
+
+    it('should format array paths correctly (e.g. tools.allowed[0])', () => {
+      const invalidSettings = {
+        tools: {
+          allowed: ['git', 123], // 123 is invalid, expected string
+        },
+      };
+
+      const result = validateSettings(invalidSettings);
+      expect(result.success).toBe(false);
+
+      if (result.error) {
+        const formatted = formatValidationError(result.error, 'test.json');
+        expect(formatted).toContain('tools.allowed[1]');
+      }
+    });
+
+    it('should limit the number of displayed errors', () => {
+      const invalidSettings = {
+        tools: {
+          // Create 6 invalid items to trigger the limit
+          allowed: [1, 2, 3, 4, 5, 6],
+        },
+      };
+
+      const result = validateSettings(invalidSettings);
+      expect(result.success).toBe(false);
+
+      if (result.error) {
+        const formatted = formatValidationError(result.error, 'test.json');
+        // Should see the first 5
+        expect(formatted).toContain('tools.allowed[0]');
+        expect(formatted).toContain('tools.allowed[4]');
+        // Should NOT see the 6th
+        expect(formatted).not.toContain('tools.allowed[5]');
+        // Should see the summary
+        expect(formatted).toContain('...and 1 more errors.');
       }
     });
   });

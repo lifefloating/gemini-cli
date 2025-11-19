@@ -9,25 +9,76 @@ import {
   getSettingsSchema,
   type SettingDefinition,
   type SettingCollectionDefinition,
+  SETTINGS_SCHEMA_DEFINITIONS,
 } from './settingsSchema.js';
 
-/**
- * Registry of union types that combine multiple Zod schemas.
- * These correspond to ref types in settingsSchema.ts that use anyOf.
- */
-const UNION_TYPE_SCHEMAS: Record<string, z.ZodTypeAny> = {
-  /**
-   * Accepts either a boolean flag or a string command name.
-   * Example: tools.sandbox can be true/false or a path string.
-   */
-  BooleanOrString: z.union([z.boolean(), z.string()]),
+// Helper to build Zod schema from the JSON-schema-like definitions
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildZodSchemaFromJsonSchema(def: any): z.ZodTypeAny {
+  if (def.anyOf) {
+    return z.union(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      def.anyOf.map((d: any) => buildZodSchemaFromJsonSchema(d)) as any,
+    );
+  }
 
-  /**
-   * Accepts either a single string or an array of strings.
-   * Example: context.fileName can be "*.ts" or ["*.ts", "*.tsx"]
-   */
-  StringOrStringArray: z.union([z.string(), z.array(z.string())]),
-};
+  if (def.type === 'string') {
+    if (def.enum) return z.enum(def.enum as [string, ...string[]]);
+    return z.string();
+  }
+  if (def.type === 'number') return z.number();
+  if (def.type === 'boolean') return z.boolean();
+
+  if (def.type === 'array') {
+    if (def.items) {
+      return z.array(buildZodSchemaFromJsonSchema(def.items));
+    }
+    return z.array(z.unknown());
+  }
+
+  if (def.type === 'object') {
+    let schema;
+    if (def.properties) {
+      const shape: Record<string, z.ZodTypeAny> = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const [key, propDef] of Object.entries(def.properties) as any) {
+        let propSchema = buildZodSchemaFromJsonSchema(propDef);
+        if (
+          def.required &&
+          Array.isArray(def.required) &&
+          def.required.includes(key)
+        ) {
+          // keep it required
+        } else {
+          propSchema = propSchema.optional();
+        }
+        shape[key] = propSchema;
+      }
+      schema = z.object(shape).passthrough();
+    } else {
+      schema = z.object({}).passthrough();
+    }
+
+    if (def.additionalProperties === false) {
+      schema = schema.strict();
+    } else if (typeof def.additionalProperties === 'object') {
+      schema = schema.catchall(
+        buildZodSchemaFromJsonSchema(def.additionalProperties),
+      );
+    }
+
+    return schema;
+  }
+
+  return z.unknown();
+}
+
+const REF_SCHEMAS: Record<string, z.ZodTypeAny> = {};
+
+// Initialize REF_SCHEMAS
+for (const [name, def] of Object.entries(SETTINGS_SCHEMA_DEFINITIONS)) {
+  REF_SCHEMAS[name] = buildZodSchemaFromJsonSchema(def);
+}
 
 /**
  * Recursively builds a Zod schema from a SettingDefinition
@@ -37,27 +88,17 @@ function buildZodSchemaFromDefinition(
 ): z.ZodTypeAny {
   let baseSchema: z.ZodTypeAny;
 
-  // Handle union types using registry
-  if (definition.ref && definition.ref in UNION_TYPE_SCHEMAS) {
-    return UNION_TYPE_SCHEMAS[definition.ref].optional();
+  // Special handling for TelemetrySettings which can be boolean or object
+  if (definition.ref === 'TelemetrySettings') {
+    const objectSchema = REF_SCHEMAS['TelemetrySettings'];
+    if (objectSchema) {
+      return z.union([z.boolean(), objectSchema]).optional();
+    }
   }
 
-  // Handle telemetry which can be boolean (false to disable) or TelemetrySettings object
-  if (definition.ref === 'TelemetrySettings' && definition.type === 'object') {
-    if (definition.properties) {
-      const shape: Record<string, z.ZodTypeAny> = {};
-      for (const [key, childDef] of Object.entries(definition.properties)) {
-        shape[key] = buildZodSchemaFromDefinition(childDef);
-      }
-      const objectSchema = z.object(shape).passthrough();
-      baseSchema = z.union([z.boolean(), objectSchema]);
-      return baseSchema.optional();
-    } else {
-      // No properties defined, use record for object schema
-      const objectSchema = z.record(z.string(), z.unknown());
-      baseSchema = z.union([z.boolean(), objectSchema]);
-      return baseSchema.optional();
-    }
+  // Handle refs using registry
+  if (definition.ref && definition.ref in REF_SCHEMAS) {
+    return REF_SCHEMAS[definition.ref].optional();
   }
 
   switch (definition.type) {
@@ -149,6 +190,10 @@ function buildZodSchemaFromDefinition(
 function buildZodSchemaFromCollection(
   collection: SettingCollectionDefinition,
 ): z.ZodTypeAny {
+  if (collection.ref && collection.ref in REF_SCHEMAS) {
+    return REF_SCHEMAS[collection.ref];
+  }
+
   switch (collection.type) {
     case 'string':
       return z.string();
@@ -251,8 +296,17 @@ export function formatValidationError(
   lines.push(`Invalid configuration in ${filePath}:`);
   lines.push('');
 
-  for (const issue of error.issues) {
-    const path = issue.path.join('.');
+  const MAX_ERRORS_TO_DISPLAY = 5;
+  const displayedIssues = error.issues.slice(0, MAX_ERRORS_TO_DISPLAY);
+
+  for (const issue of displayedIssues) {
+    const path = issue.path.reduce(
+      (acc, curr) =>
+        typeof curr === 'number'
+          ? `${acc}[${curr}]`
+          : `${acc ? acc + '.' : ''}${curr}`,
+      '',
+    );
     lines.push(`Error in: ${path || '(root)'}`);
     lines.push(`    ${issue.message}`);
 
@@ -261,6 +315,13 @@ export function formatValidationError(
       const received = issue.received;
       lines.push(`Expected: ${expected}, but received: ${received}`);
     }
+    lines.push('');
+  }
+
+  if (error.issues.length > MAX_ERRORS_TO_DISPLAY) {
+    lines.push(
+      `...and ${error.issues.length - MAX_ERRORS_TO_DISPLAY} more errors.`,
+    );
     lines.push('');
   }
 
