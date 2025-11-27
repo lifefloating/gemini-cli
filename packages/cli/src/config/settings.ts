@@ -120,6 +120,7 @@ const MIGRATION_MAP: Record<string, string> = {
   enableInteractiveShell: 'tools.shell.enableInteractiveShell',
   shellPager: 'tools.shell.pager',
   shellShowColor: 'tools.shell.showColor',
+  shellInactivityTimeout: 'tools.shell.inactivityTimeout',
   skipNextSpeakerCheck: 'model.skipNextSpeakerCheck',
   summarizeToolOutput: 'model.summarizeToolOutput',
   telemetry: 'telemetry',
