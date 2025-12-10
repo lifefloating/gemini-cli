@@ -73,6 +73,70 @@ function buildZodSchemaFromJsonSchema(def: any): z.ZodTypeAny {
   return z.unknown();
 }
 
+/**
+ * Builds a Zod enum schema from options array
+ */
+function buildEnumSchema(
+  options: ReadonlyArray<{ value: string | number | boolean; label: string }>,
+): z.ZodTypeAny {
+  if (!options || options.length === 0) {
+    throw new Error(
+      `Enum type must have options defined. Check your settings schema definition.`,
+    );
+  }
+  const values = options.map((opt) => opt.value);
+  if (values.every((v) => typeof v === 'string')) {
+    return z.enum(values as [string, ...string[]]);
+  } else if (values.every((v) => typeof v === 'number')) {
+    return z.union(
+      values.map((v) => z.literal(v)) as [
+        z.ZodLiteral<number>,
+        z.ZodLiteral<number>,
+        ...Array<z.ZodLiteral<number>>,
+      ],
+    );
+  } else {
+    return z.union(
+      values.map((v) => z.literal(v)) as [
+        z.ZodLiteral<unknown>,
+        z.ZodLiteral<unknown>,
+        ...Array<z.ZodLiteral<unknown>>,
+      ],
+    );
+  }
+}
+
+/**
+ * Builds a Zod object shape from properties record
+ */
+function buildObjectShapeFromProperties(
+  properties: Record<string, SettingDefinition>,
+): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {};
+  for (const [key, childDef] of Object.entries(properties)) {
+    shape[key] = buildZodSchemaFromDefinition(childDef);
+  }
+  return shape;
+}
+
+/**
+ * Builds a Zod schema for primitive types (string, number, boolean)
+ */
+function buildPrimitiveSchema(
+  type: 'string' | 'number' | 'boolean',
+): z.ZodTypeAny {
+  switch (type) {
+    case 'string':
+      return z.string();
+    case 'number':
+      return z.number();
+    case 'boolean':
+      return z.boolean();
+    default:
+      return z.unknown();
+  }
+}
+
 const REF_SCHEMAS: Record<string, z.ZodTypeAny> = {};
 
 // Initialize REF_SCHEMAS
@@ -103,43 +167,13 @@ function buildZodSchemaFromDefinition(
 
   switch (definition.type) {
     case 'string':
-      baseSchema = z.string();
-      break;
-
     case 'number':
-      baseSchema = z.number();
-      break;
-
     case 'boolean':
-      baseSchema = z.boolean();
+      baseSchema = buildPrimitiveSchema(definition.type);
       break;
 
     case 'enum': {
-      if (!definition.options || definition.options.length === 0) {
-        throw new Error(
-          `Enum type must have options defined. Check your settings schema definition.`,
-        );
-      }
-      const values = definition.options.map((opt) => opt.value);
-      if (values.every((v) => typeof v === 'string')) {
-        baseSchema = z.enum(values as [string, ...string[]]);
-      } else if (values.every((v) => typeof v === 'number')) {
-        baseSchema = z.union(
-          values.map((v) => z.literal(v)) as [
-            z.ZodLiteral<number>,
-            z.ZodLiteral<number>,
-            ...Array<z.ZodLiteral<number>>,
-          ],
-        );
-      } else {
-        baseSchema = z.union(
-          values.map((v) => z.literal(v)) as [
-            z.ZodLiteral<unknown>,
-            z.ZodLiteral<unknown>,
-            ...Array<z.ZodLiteral<unknown>>,
-          ],
-        );
-      }
+      baseSchema = buildEnumSchema(definition.options!);
       break;
     }
 
@@ -154,10 +188,7 @@ function buildZodSchemaFromDefinition(
 
     case 'object':
       if (definition.properties) {
-        const shape: Record<string, z.ZodTypeAny> = {};
-        for (const [key, childDef] of Object.entries(definition.properties)) {
-          shape[key] = buildZodSchemaFromDefinition(childDef);
-        }
+        const shape = buildObjectShapeFromProperties(definition.properties);
         baseSchema = z.object(shape).passthrough();
 
         if (definition.additionalProperties) {
@@ -196,58 +227,24 @@ function buildZodSchemaFromCollection(
 
   switch (collection.type) {
     case 'string':
-      return z.string();
-
     case 'number':
-      return z.number();
-
     case 'boolean':
-      return z.boolean();
+      return buildPrimitiveSchema(collection.type);
 
     case 'enum': {
-      if (!collection.options || collection.options.length === 0) {
-        throw new Error(
-          `Enum type must have options defined. Check your settings schema definition.`,
-        );
-      }
-      const values = collection.options.map((opt) => opt.value);
-      if (values.every((v) => typeof v === 'string')) {
-        return z.enum(values as [string, ...string[]]);
-      } else if (values.every((v) => typeof v === 'number')) {
-        return z.union(
-          values.map((v) => z.literal(v)) as [
-            z.ZodLiteral<number>,
-            z.ZodLiteral<number>,
-            ...Array<z.ZodLiteral<number>>,
-          ],
-        );
-      } else {
-        return z.union(
-          values.map((v) => z.literal(v)) as [
-            z.ZodLiteral<unknown>,
-            z.ZodLiteral<unknown>,
-            ...Array<z.ZodLiteral<unknown>>,
-          ],
-        );
-      }
+      return buildEnumSchema(collection.options!);
     }
 
     case 'array':
       if (collection.properties) {
-        const shape: Record<string, z.ZodTypeAny> = {};
-        for (const [key, childDef] of Object.entries(collection.properties)) {
-          shape[key] = buildZodSchemaFromDefinition(childDef);
-        }
+        const shape = buildObjectShapeFromProperties(collection.properties);
         return z.array(z.object(shape));
       }
       return z.array(z.unknown());
 
     case 'object':
       if (collection.properties) {
-        const shape: Record<string, z.ZodTypeAny> = {};
-        for (const [key, childDef] of Object.entries(collection.properties)) {
-          shape[key] = buildZodSchemaFromDefinition(childDef);
-        }
+        const shape = buildObjectShapeFromProperties(collection.properties);
         return z.object(shape).passthrough();
       }
       return z.record(z.string(), z.unknown());
